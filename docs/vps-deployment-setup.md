@@ -1,5 +1,12 @@
 # VPS Deployment Guide (always-on autonomous trading)
 
+> ⚠️ **Superseded — use `deploy/README.md` as the authoritative runbook.** Two
+> corrections were made there: (1) the headless stack is **IB Gateway + IBC**
+> (`gnzsnz/ib-gateway-docker`, ports 4001/4002), NOT IBeam — IBeam is the Client
+> Portal Web API, which our `ib_async` broker does not use; (2) with IB Gateway
+> auto-restart, **2FA is required only once per week** (after the Sunday 01:00 ET
+> token reset), not per login. The conceptual background below is still useful.
+
 **Goal:** run the trading system unattended for years on a small cloud host, so the Friday-weights and Monday-execution jobs fire even when your laptop is off (you noted school resumes ~Sep 2026 and local uptime isn't guaranteed).
 
 **The honest hard part is not the server — it's keeping IB Gateway logged in unattended through IBKR's daily session reset and 2FA.** This guide covers both, and the failure-alerting safety net for when it hiccups.

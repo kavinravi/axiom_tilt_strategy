@@ -1,0 +1,7 @@
+[Unit]
+Description=Axiom Tilt failure alert for %i
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/axiom_tilt_strategy
+ExecStart=%h/axiom_tilt_strategy/.venv/bin/python -m trading.alerts "axiom-tilt: unit %i failed"

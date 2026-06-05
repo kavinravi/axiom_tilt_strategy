@@ -1,0 +1,11 @@
+[Unit]
+Description=Monday 15:00 ET - execute the weekly rebalance
+
+[Timer]
+OnCalendar=Mon *-*-* 15:00:00 America/New_York
+# Persistent=false on purpose: a MISSED rebalance must NOT fire late at a random
+# boot time. If it's missed, the OnFailure alert tells you and a human decides.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

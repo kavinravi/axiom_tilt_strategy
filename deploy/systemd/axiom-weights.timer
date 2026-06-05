@@ -1,0 +1,11 @@
+[Unit]
+Description=Friday 18:00 ET - freeze weekly target weights
+
+[Timer]
+# 18:00 ET gives Sharadar's end-of-day data time to post. TZ suffix is DST-safe.
+OnCalendar=Fri *-*-* 18:00:00 America/New_York
+# Catch up if the host was down at fire time (read-only job, safe to run late):
+Persistent=true
+
+[Install]
+WantedBy=timers.target

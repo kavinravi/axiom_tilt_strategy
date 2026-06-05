@@ -1,0 +1,10 @@
+[Unit]
+Description=Every 20 min on weekdays - publish live snapshot (self-skips off-hours)
+
+[Timer]
+# Minutes 00/20/40 across 09:00-16:00 ET, weekdays. The job itself enforces the
+# precise 09:30-16:00 window, so a couple of off-window fires are cheap no-ops.
+OnCalendar=Mon..Fri *-*-* 09..16:00/20 America/New_York
+
+[Install]
+WantedBy=timers.target
