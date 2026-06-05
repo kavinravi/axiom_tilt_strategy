@@ -1,0 +1,128 @@
+{
+  "years": [
+    {
+      "year": 2002,
+      "n_rows": 77708,
+      "status": "skipped"
+    },
+    {
+      "year": 2003,
+      "n_rows": 78372,
+      "status": "skipped"
+    },
+    {
+      "year": 2004,
+      "n_rows": 79219,
+      "status": "skipped"
+    },
+    {
+      "year": 2005,
+      "n_rows": 80428,
+      "status": "skipped"
+    },
+    {
+      "year": 2006,
+      "n_rows": 80835,
+      "status": "skipped"
+    },
+    {
+      "year": 2007,
+      "n_rows": 82282,
+      "status": "skipped"
+    },
+    {
+      "year": 2008,
+      "n_rows": 84970,
+      "status": "skipped"
+    },
+    {
+      "year": 2009,
+      "n_rows": 85926,
+      "status": "skipped"
+    },
+    {
+      "year": 2010,
+      "n_rows": 87158,
+      "status": "skipped"
+    },
+    {
+      "year": 2011,
+      "n_rows": 89145,
+      "status": "skipped"
+    },
+    {
+      "year": 2012,
+      "n_rows": 91771,
+      "status": "skipped"
+    },
+    {
+      "year": 2013,
+      "n_rows": 94397,
+      "status": "skipped"
+    },
+    {
+      "year": 2014,
+      "n_rows": 95966,
+      "status": "skipped"
+    },
+    {
+      "year": 2015,
+      "n_rows": 98560,
+      "status": "skipped"
+    },
+    {
+      "year": 2016,
+      "n_rows": 102628,
+      "status": "skipped"
+    },
+    {
+      "year": 2017,
+      "n_rows": 105449,
+      "status": "skipped"
+    },
+    {
+      "year": 2018,
+      "n_rows": 107547,
+      "status": "skipped"
+    },
+    {
+      "year": 2019,
+      "n_rows": 110494,
+      "status": "skipped"
+    },
+    {
+      "year": 2020,
+      "n_rows": 113904,
+      "status": "skipped"
+    },
+    {
+      "year": 2021,
+      "n_rows": 115636,
+      "status": "skipped"
+    },
+    {
+      "year": 2022,
+      "n_rows": 117133,
+      "status": "skipped"
+    },
+    {
+      "year": 2023,
+      "n_rows": 119024,
+      "status": "skipped"
+    },
+    {
+      "year": 2024,
+      "n_rows": 120964,
+      "status": "skipped"
+    },
+    {
+      "year": 2025,
+      "n_rows": 119668,
+      "n_permnos": 483,
+      "nan_rate_text_novelty": 0.08066483938897617,
+      "nan_rate_days_since_filing": 0.002440084233044757,
+      "nan_rate_fwd_ret_5d": 0.02049837884814654,
+      "status": "written"
+    }
+  ]
+}

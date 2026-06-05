@@ -1,0 +1,45 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+artifacts/
+wandb/
+mlruns/
+.env
+
+# Bulk data (regeneratable from sources + code; too large for git)
+# data/processed/ stays tracked — it's the small, useful artifact for laptop sync
+data/raw/
+data/interim/
+data/embeddings/
+# Large derivatives that go to Cloudflare R2, not git
+data/processed/finbert_tok/
+data/processed/crsp_daily/
+data/processed/panel/
+data/processed/sharadar_sf1.parquet
+data/processed/sharadar_tickers.parquet
+data/processed/finbert_doc_embed/
+data/processed/finbert_stockday_embed/
+data/processed/training_panel/
+data/archive/
+
+*.log
+logs/*.csv
+# experiments/: keep configs + STATE.md + results.tsv as a research log,
+# but exclude per-run training artifacts (model.zip, TB events, etc.)
+experiments/runs/
+
+# Live trading run artifacts (regeneratable; may contain account-specific data)
+trading/audit/
+
+# Brainstorming visual companion (local-only)
+.superpowers/

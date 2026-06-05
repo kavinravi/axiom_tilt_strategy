@@ -1,0 +1,71 @@
+# Install: pip install -r requirements.txt
+# Targets RTX 5090 / Blackwell (sm_120). PyTorch cu128 wheels are pulled from the extra index below.
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# Core data
+numpy>=1.26
+pandas>=2.2
+pyarrow>=16
+
+# Deep learning + Hugging Face stack (Blackwell-compatible)
+torch>=2.7.0
+transformers>=4.46
+tokenizers>=0.20
+accelerate>=1.0
+datasets>=3.0
+
+# Tabular ML
+lightgbm>=4.5
+xgboost>=2.1
+scikit-learn>=1.5
+optuna>=3.5
+
+# RL
+d3rlpy>=2.6
+gymnasium>=1.0
+stable-baselines3>=2.4
+
+# Optimization / portfolio (cvxpy for MinVar QP in notebook 08 backtest)
+cvxpy>=1.5
+scipy>=1.13
+
+# Backtest / metrics
+empyrical>=0.5.5
+
+# Plotting
+matplotlib>=3.9
+plotly>=5.24
+
+# Data ingestion
+requests>=2.32
+beautifulsoup4>=4.12
+lxml>=5.2
+tenacity>=8.5
+python-dotenv>=1.0
+pandas-datareader>=0.10
+tqdm>=4.66
+# WRDS (CRSP prices/returns) — primary price source. See docs/wrds-setup.md
+wrds>=3.2
+psycopg2-binary>=2.9
+# Sharadar SF1 via Nasdaq Data Link — primary fundamentals source (PIT, 1998+)
+# NOTE: PyPI distribution is "Nasdaq-Data-Link"; the import name is "nasdaqdatalink".
+Nasdaq-Data-Link>=1.0
+# yfinance — live-trading fallback macro/SPY source (^VIX, ^TNX, SPY) when FRED is unreachable
+yfinance>=0.2
+# ib_async — Interactive Brokers API client (live execution; needs IB Gateway/TWS running)
+ib_async>=1.0
+# DuckDB for SQL queries against parquet
+duckdb>=1.1
+# supabase — Postgres datastore client for the read-only dashboard publisher (Plan: dashboard)
+supabase>=2.0
+
+# Notebook tooling
+nbformat>=5.10
+jupyter>=1.0
+
+# Tooling
+pyyaml>=6.0
+pytest>=8
+ruff>=0.6
+black>=24.8
+pre-commit>=3.8

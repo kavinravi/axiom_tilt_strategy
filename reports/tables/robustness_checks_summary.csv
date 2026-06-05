@@ -1,0 +1,4 @@
+metric,PPO_realized,random_alpha1_mean,random_alpha1_p_value,random_match_mean,random_match_p_value,bootstrap_95ci
+Sharpe (gross),0.9297,0.8023,0.0455,0.8347,0.0035,"(0.311, 1.587)"
+Total return (net),49.9354,22.7366,0.0055,28.2321,0.0,"(3.366, 585.267)"
+Max drawdown,-0.5432,-0.536,0.3745,-0.5327,0.141,"(-0.764, -0.302)"
