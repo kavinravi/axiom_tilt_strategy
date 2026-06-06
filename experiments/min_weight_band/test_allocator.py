@@ -39,3 +39,24 @@ def test_infeasible_band_raises():
         band_water_fill(np.ones(5), floor=0.02, cap=0.10)   # 5*0.10 = 0.5 < 1
     with pytest.raises(ValueError):
         band_water_fill(np.ones(60), floor=0.02, cap=0.10)  # 60*0.02 = 1.2 > 1
+
+
+def test_finalizer_fires_when_all_pinned_simultaneously():
+    # K=3, floor=0.2, cap=0.7: iteration 0 pins all three simultaneously,
+    # leaving sum=1.1; finalizer must repair to [0.6, 0.2, 0.2].
+    w = band_water_fill([10.0, 1.0, 1.0], floor=0.2, cap=0.7)
+    assert abs(w.sum() - 1.0) < 1e-9
+    assert w.min() >= 0.2 - 1e-9
+    assert w.max() <= 0.7 + 1e-9
+    assert w[0] > w[1]  # mcap order preserved: heaviest name above floor
+
+
+def test_nan_and_negative_mcaps_get_floor():
+    # indices 1 and 3 have bad mcaps -> should receive floor; others get
+    # mcap-proportional above floor.
+    w = band_water_fill([100.0, np.nan, 50.0, -5.0, 10.0], floor=0.02, cap=0.50)
+    assert abs(w.sum() - 1.0) < 1e-9
+    assert w.min() >= 0.02 - 1e-9
+    assert w.max() <= 0.50 + 1e-9
+    np.testing.assert_allclose(w[1], 0.02, atol=1e-9)
+    np.testing.assert_allclose(w[3], 0.02, atol=1e-9)

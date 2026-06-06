@@ -50,7 +50,7 @@ def band_water_fill(mcaps, floor: float = 0.02, cap: float = 0.10) -> np.ndarray
                    else residual * fb / fb.sum())
 
     # Finalizer: repair float residual by moving only into available slack.
-    for _ in range(K + 5):
+    for _ in range(K + 5):  # converges in <=2 iterations analytically; budget is defensive
         w = np.clip(w, floor, cap)
         residual = 1.0 - w.sum()
         if abs(residual) < 1e-12:
