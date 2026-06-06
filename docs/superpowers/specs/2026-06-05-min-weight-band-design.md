@@ -121,12 +121,26 @@ forced equal-weight), so the labels change:
 
 ## 6. Backtest & acceptance
 
-Walk-forward **2010–2025**, mirroring `regime_k_selector.py`, **net of 5 bps ×
-turnover** (turnover = Σ_i |w_t(i) − w_{t-1}(i)|, matching the existing harness/notebook
-convention). Per OOS Friday, record the selected-K band portfolio's weekly return and
-its weight vector (for turnover).
+One walk-forward pass (mirroring `regime_k_selector.py`) produces a single OOS
+weekly-return series per strategy — Fridays **2009→2025** (walk 1 tests 2009). Returns
+are **net of 5 bps × turnover** (turnover = Σ_i |w_t(i) − w_{t-1}(i)|, matching the
+existing harness/notebook convention). Per OOS Friday, record the selected-K band
+portfolio's weekly return and its weight vector (for turnover).
 
-**Head-to-head table** — candidate vs the thing it replaces vs market vs a static ref:
+**Report the head-to-head table over THREE windows** (masks on the same OOS series),
+because each tells a different and complementary story:
+
+- **Full 2009–2025** — the most honest record, but includes the GFC-recovery tail,
+  which is an anomalous, hard-to-repeat regime.
+- **2010–2025** — cuts the GFC off for a cleaner regime read, at the cost of
+  completeness.
+- **2025 only** — performance in the conditions most like today, but least robust
+  (2025 was a strong year, so small sample + favorable tape).
+
+No window is privileged; all three are presented side by side so the owner can weigh
+honesty vs. relevance themselves.
+
+**Head-to-head table (per window)** — candidate vs the thing it replaces vs market vs a static ref:
 
 | strategy | ann | vol | **Sharpe** | Sortino | **maxDD** | turnover | avg N | avg min-wt |
 |---|---|---|---|---|---|---|---|---|
