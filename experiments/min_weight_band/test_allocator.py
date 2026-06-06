@@ -85,3 +85,28 @@ def test_band_topk_picks_k_names_in_band_summing_to_one():
 def test_band_topk_k10_all_at_cap():
     w = band_topk(_scored(60), K=10, floor=0.02, cap=0.10, id_col="id")
     np.testing.assert_allclose(sorted(w.values()), [0.10] * 10, atol=1e-9)
+
+
+from experiments.min_weight_band.allocator import band_per_k_weights_and_returns
+
+
+def _panel_two_dates():
+    rows = []
+    for d in (pd.Timestamp("2020-01-03"), pd.Timestamp("2020-01-10")):
+        for i in range(30):
+            rows.append({"date": d, "permno": i, "score": 30 - i,
+                         "mcap": float(100 - i), "fwd_ret_5d": 0.01 * (i % 5 - 2)})
+    return pd.DataFrame(rows)
+
+
+def test_band_per_k_returns_shape_and_band():
+    wdf, rdf = band_per_k_weights_and_returns(_panel_two_dates(), K=20)
+    # weights: each date has exactly 20 names, all in band, summing to 1
+    for d, g in wdf.groupby("date"):
+        assert len(g) == 20
+        assert g["weight"].min() >= 0.02 - 1e-9
+        assert g["weight"].max() <= 0.10 + 1e-9
+        assert abs(g["weight"].sum() - 1.0) < 1e-9
+    # returns: one finite value per date
+    assert len(rdf) == 2
+    assert rdf.notna().all()
