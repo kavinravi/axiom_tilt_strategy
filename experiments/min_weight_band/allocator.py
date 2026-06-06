@@ -61,3 +61,13 @@ def band_water_fill(mcaps, floor: float = 0.02, cap: float = 0.10) -> np.ndarray
             break
         w = w + residual * slack / s
     return w
+
+
+def band_topk(scored_df: pd.DataFrame, K: int, floor: float = 0.02,
+              cap: float = 0.10, id_col: str = "id") -> dict[Any, float]:
+    """Top-K by `score`, band-weighted by mcap. Single-date frame in,
+    {id: weight} out. Exactly K holdings, each in [floor, cap], summing to 1."""
+    g = scored_df.sort_values("score", ascending=False).head(K).reset_index(drop=True)
+    w = band_water_fill(g["mcap"].to_numpy(dtype=np.float64), floor=floor, cap=cap)
+    return {idv: float(min(max(wt, floor), cap))
+            for idv, wt in zip(g[id_col].to_numpy(), w)}

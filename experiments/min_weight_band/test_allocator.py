@@ -60,3 +60,28 @@ def test_nan_and_negative_mcaps_get_floor():
     assert w.max() <= 0.50 + 1e-9
     np.testing.assert_allclose(w[1], 0.02, atol=1e-9)
     np.testing.assert_allclose(w[3], 0.02, atol=1e-9)
+
+
+from experiments.min_weight_band.allocator import band_topk
+
+
+def _scored(n):
+    return pd.DataFrame({
+        "id": list(range(n)),
+        "score": np.linspace(1.0, 0.0, n),    # descending
+        "mcap": np.linspace(100.0, 10.0, n),  # descending
+    })
+
+
+def test_band_topk_picks_k_names_in_band_summing_to_one():
+    w = band_topk(_scored(60), K=25, floor=0.02, cap=0.10, id_col="id")
+    assert len(w) == 25
+    assert abs(sum(w.values()) - 1.0) < 1e-9
+    assert min(w.values()) >= 0.02 - 1e-9
+    assert max(w.values()) <= 0.10 + 1e-9
+    assert set(w.keys()) == set(range(25))  # top-25 by score
+
+
+def test_band_topk_k10_all_at_cap():
+    w = band_topk(_scored(60), K=10, floor=0.02, cap=0.10, id_col="id")
+    np.testing.assert_allclose(sorted(w.values()), [0.10] * 10, atol=1e-9)
