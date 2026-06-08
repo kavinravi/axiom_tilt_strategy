@@ -173,6 +173,62 @@ def _reindex_weekly(obj, index):
     return obj.reindex(combined).ffill().reindex(index)
 
 
+# --- FRED REST API (api.stlouisfed.org) -----------------------------------
+# Used when FRED_API_KEY is set. This host is reachable even where the
+# pandas_datareader CSV host (fred.stlouisfed.org) is firewalled, and it returns
+# the exact training series (VIXCLS, DGS10, T10Y2Y, SP500) with stable official
+# closes — no yfinance/AlphaVantage drift.
+
+def _parse_fred_observations(payload: dict) -> pd.Series:
+    """Turn a FRED /series/observations JSON payload into a sorted float Series.
+
+    Skips FRED's "." missing-value placeholder. Raises (fail-loud) when there are
+    no usable observations, so the caller falls back instead of silently zeroing
+    a regime feature."""
+    obs = payload.get("observations") if isinstance(payload, dict) else None
+    if not obs:
+        raise RuntimeError(f"FRED API: no observations in response: {str(payload)[:160]}")
+    s = pd.Series({pd.Timestamp(o["date"]): float(o["value"])
+                   for o in obs if o.get("value") not in (".", None, "")})
+    if s.empty:
+        raise RuntimeError("FRED API: observations parsed to an empty series (all placeholders?)")
+    return s.sort_index()
+
+
+def _fred_api_series(series_id: str, start, end, key: str) -> pd.Series:
+    """Fetch one FRED series from the REST API host as a daily float Series."""
+    import json  # noqa: PLC0415
+    import urllib.parse  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+    params = urllib.parse.urlencode({
+        "series_id": series_id, "api_key": key, "file_type": "json",
+        "observation_start": pd.Timestamp(start).strftime("%Y-%m-%d"),
+        "observation_end": pd.Timestamp(end).strftime("%Y-%m-%d"),
+    })
+    url = f"https://api.stlouisfed.org/fred/series/observations?{params}"
+
+    def _pull():
+        with urllib.request.urlopen(url, timeout=25) as resp:
+            return json.load(resp)
+
+    return _parse_fred_observations(_retry(_pull, attempts=3, delay=2.0))
+
+
+def _fred_api_macro(index: pd.DatetimeIndex, end: pd.Timestamp, key: str) -> pd.DataFrame:
+    start = index.min() - pd.Timedelta(days=90)
+    cols = {col: _fred_api_series(fred_id, start, end, key)
+            for fred_id, col in FRED_MACRO_SERIES.items()}
+    df = pd.DataFrame(cols)
+    return _reindex_weekly(df.ffill(), index)[list(FRED_MACRO_SERIES.values())]
+
+
+def _fred_api_spy(index: pd.DatetimeIndex, end: pd.Timestamp, key: str) -> pd.Series:
+    start = index.min() - pd.Timedelta(days=30)
+    s = _reindex_weekly(_fred_api_series(FRED_SPY_SERIES, start, end, key).ffill(), index)
+    s.name = "close"
+    return s
+
+
 def _fred_macro(index: pd.DatetimeIndex, end: pd.Timestamp) -> pd.DataFrame:
     from pandas_datareader import data as pdr  # noqa: PLC0415
     start = index.min() - pd.Timedelta(days=90)
@@ -229,8 +285,18 @@ def _yf_macro(index: pd.DatetimeIndex, end: pd.Timestamp) -> pd.DataFrame:
 def fetch_macro_history(index: pd.DatetimeIndex, end: pd.Timestamp) -> pd.DataFrame:
     """Macro features (macro_vixcls, macro_dgs10, macro_t10y2y) on the weekly index.
 
-    FRED primary; on failure, yfinance (^VIX, ^TNX) + AlphaVantage (2y) fallback.
+    Order: FRED REST API (api.stlouisfed.org, needs FRED_API_KEY) → FRED CSV via
+    pandas_datareader → yfinance (^VIX, ^TNX) + AlphaVantage (2y) fallback. The
+    REST API is preferred because it is reachable where the CSV host is firewalled
+    and returns the exact, stable training series.
     """
+    from src.utils.env import get_env  # noqa: PLC0415
+    key = get_env("FRED_API_KEY", default="")
+    if key:
+        try:
+            return _fred_api_macro(index, end, key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("FRED API macro unavailable (%s); trying CSV then yfinance", exc)
     try:
         return _fred_macro(index, end)
     except Exception as exc:  # noqa: BLE001
@@ -264,7 +330,18 @@ def _yf_spy(index: pd.DatetimeIndex, end: pd.Timestamp) -> pd.Series:
 
 
 def fetch_spy_weekly(index: pd.DatetimeIndex, end: pd.Timestamp) -> pd.Series:
-    """Weekly Friday SPY close series. FRED SP500 primary; yfinance SPY fallback."""
+    """Weekly Friday SPY close series.
+
+    Order: FRED REST API (SP500, needs FRED_API_KEY) → FRED CSV via
+    pandas_datareader → yfinance SPY fallback.
+    """
+    from src.utils.env import get_env  # noqa: PLC0415
+    key = get_env("FRED_API_KEY", default="")
+    if key:
+        try:
+            return _fred_api_spy(index, end, key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("FRED API SPY unavailable (%s); trying CSV then yfinance", exc)
     try:
         return _fred_spy(index, end)
     except Exception as exc:  # noqa: BLE001
