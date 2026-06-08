@@ -74,3 +74,17 @@ def test_fetch_close_history_single_ticker_flat_columns():
                                       download=fake_download)
     assert list(out.columns) == ["AAA"]
     assert out.loc[pd.Timestamp("2026-06-08"), "AAA"] == 10.0   # NaN forward-filled
+
+
+def test_fetch_close_history_sorts_by_date():
+    import pandas as pd
+    from trading.data import sources
+
+    idx = pd.to_datetime(["2026-06-09", "2026-06-05", "2026-06-08"])  # out of order
+    cols = pd.MultiIndex.from_tuples([("Close", "AAA"), ("Close", "BBB")])
+    raw = pd.DataFrame([[12.0, 22.0], [10.0, 20.0], [11.0, 21.0]], index=idx, columns=cols)
+    out = sources.fetch_close_history(["AAA", "BBB"], "2026-06-05", "2026-06-10",
+                                      download=lambda *a, **k: raw)
+    assert list(out.index) == list(
+        pd.to_datetime(["2026-06-05", "2026-06-08", "2026-06-09"]).normalize())
+    assert out["AAA"].iloc[-1] == 12.0   # latest date's close is last row

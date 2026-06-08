@@ -414,4 +414,4 @@ def fetch_close_history(tickers, start, end, download=None) -> pd.DataFrame:
         logger.warning("fetch_close_history: unexpected column structure %s; downstream NaNs likely", list(raw.columns))
         close = raw
     close.index = pd.to_datetime(close.index).normalize()
-    return close.reindex(columns=tickers).ffill()
+    return close.reindex(columns=tickers).sort_index().ffill()
