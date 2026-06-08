@@ -1,10 +1,11 @@
 [Unit]
-Description=Every 20 min on weekdays - publish live snapshot (self-skips off-hours)
+Description=Daily after US close - publish dashboard snapshot from the audit trail
 
 [Timer]
-# Minutes 00/20/40 across 09:00-16:00 ET, weekdays. The job itself enforces the
-# precise 09:30-16:00 window, so a couple of off-window fires are cheap no-ops.
-OnCalendar=Mon..Fri *-*-* 09..16:00/20 America/New_York
+# 16:30 America/New_York, every day. The publisher is broker-free (reads the order
+# audit + yfinance), so it does not need the IBKR Gateway and has no market-hours guard.
+OnCalendar=*-*-* 16:30 America/New_York
+Persistent=true
 
 [Install]
 WantedBy=timers.target
