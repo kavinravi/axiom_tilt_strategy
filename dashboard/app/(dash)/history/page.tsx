@@ -9,6 +9,8 @@ import { PersistenceHeatmap } from "@/components/PersistenceHeatmap";
 import { TurnoverCard } from "@/components/TurnoverCard";
 import { ExecQualityTable } from "@/components/ExecQualityTable";
 import { Empty } from "@/components/Empty";
+import { SectorComparison } from "@/components/SectorComparison";
+import { aggregateSectors } from "@/lib/sectors";
 
 type Payload = {
   fridays: string[]; selected: string | null;
@@ -56,6 +58,10 @@ function HistoryInner() {
           </tbody>
         </table>
       </div>
+      <SectorComparison
+        portfolio={aggregateSectors(data.weekly, "target_weight")}
+        title={`Target Sector Allocation (${data.selected})`}
+      />
       <TurnoverCard turnover={data.turnover} />
       <PersistenceHeatmap all={data.allWeekly} />
       <ExecQualityTable executions={data.executions} />

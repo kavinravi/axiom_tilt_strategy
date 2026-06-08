@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, useState } from "react";
 import { usePolling } from "@/lib/usePolling";
-import type { EquityPoint, Snapshot } from "@/lib/types";
+import type { EquityPoint, Holding, Snapshot } from "@/lib/types";
 import { fmtMoney, fmtPct, fmtSignedPct } from "@/lib/format";
 import { useSearchParams } from "next/navigation";
 import { StatCard } from "@/components/StatCard";
@@ -10,6 +10,8 @@ import { RiskCard } from "@/components/RiskCard";
 import { RegimeBar } from "@/components/RegimeBar";
 import { Empty } from "@/components/Empty";
 import { AsOf } from "@/components/AsOf";
+import { SectorComparison } from "@/components/SectorComparison";
+import { aggregateSectors } from "@/lib/sectors";
 
 const RANGES = ["1W", "1M", "3M", "All"] as const;
 type Range = (typeof RANGES)[number];
@@ -23,7 +25,7 @@ function sliceRange(curve: EquityPoint[], range: Range): EquityPoint[] {
   return windowed.length > 1 ? windowed : curve; // never collapse to <2 points
 }
 
-type Payload = { snapshot: Snapshot | null; equityCurve: EquityPoint[] };
+type Payload = { snapshot: Snapshot | null; equityCurve: EquityPoint[]; holdings: Holding[] };
 
 function NowInner() {
   const scenario = useSearchParams().get("scenario");
@@ -40,6 +42,7 @@ function NowInner() {
     );
   const s = data?.snapshot ?? null;
   const curve = data?.equityCurve ?? [];
+  const holdings = data?.holdings ?? [];
 
   if (!s) {
     return (
@@ -88,6 +91,12 @@ function NowInner() {
       )}
       <RiskCard risk={s.risk} />
       <RegimeBar kProbs={s.k_probs} features={s.regime_features} />
+      {holdings.length > 0 && (
+        <SectorComparison
+          portfolio={aggregateSectors(holdings, "weight_actual")}
+          title="Sector Allocation (current)"
+        />
+      )}
     </div>
   );
 }

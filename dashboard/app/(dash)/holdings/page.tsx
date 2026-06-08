@@ -6,6 +6,8 @@ import type { Holding } from "@/lib/types";
 import { ConcentrationBars } from "@/components/ConcentrationBars";
 import { Empty } from "@/components/Empty";
 import { AsOf } from "@/components/AsOf";
+import { SectorComparison } from "@/components/SectorComparison";
+import { aggregateSectors } from "@/lib/sectors";
 
 type Payload = { holdings: Holding[]; asof: string | null };
 
@@ -31,6 +33,10 @@ function HoldingsInner() {
     <div className="space-y-3">
       <div className="flex justify-end"><AsOf iso={data?.asof ?? null} /></div>
       <ConcentrationBars holdings={holdings} />
+      <SectorComparison
+        portfolio={aggregateSectors(holdings, "weight_actual")}
+        title="Sector Allocation"
+      />
     </div>
   );
 }
