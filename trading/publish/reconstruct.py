@@ -27,3 +27,33 @@ def current_holdings(history: list[dict]) -> dict[str, float]:
         if post is not None:
             return {str(k): float(v) for k, v in post.items() if float(v) != 0.0}
     return {}
+
+
+def _signed_qty(fill: dict) -> float:
+    qty = float(fill.get("quantity", 0.0))
+    return qty if fill.get("side", "BUY") == "BUY" else -qty
+
+
+def _first_build(history: list[dict]) -> dict:
+    anchor = next((r for r in history if r.get("first_build")), None)
+    if anchor is None:
+        raise ValueError("reconstruct: no first_build record in history")
+    return anchor
+
+
+def inception_date(history: list[dict]) -> pd.Timestamp:
+    """Normalized asof of the first_build record (when the strategy went live)."""
+    return pd.Timestamp(_first_build(history)["asof"]).normalize()
+
+
+def cash_after(history: list[dict]) -> float:
+    """Residual cash = inception NAV - sum(signed fill qty * avg_price).
+
+    BUY spends cash (signed +qty); SELL returns cash (signed -qty, so subtracting
+    a negative adds). Inception NAV is the first_build record's all-cash 'nav'.
+    """
+    cash = float(_first_build(history)["nav"])
+    for rec in history:
+        for f in rec.get("fills", []):
+            cash -= _signed_qty(f) * float(f.get("avg_price") or 0.0)
+    return cash
