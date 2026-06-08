@@ -275,32 +275,32 @@ def fetch_spy_close() -> float | None:
 
 
 def main() -> int:
-    """CLI entrypoint for the systemd timer: `python -m trading.publish`."""
+    """CLI entrypoint for the daily timer: `python -m trading.publish`.
+
+    Broker-free: holdings, NAV, and the equity curve are reconstructed from the
+    order audit + yfinance closes. No IBKR connection, no market-hours guard.
+    """
     import trading.config as config  # noqa: PLC0415
-    from trading.broker.ibkr import IBKRBroker  # noqa: PLC0415
     from trading.data.snapshot import most_recent_friday  # noqa: PLC0415
-    from trading.data.sources import fetch_ticker_metadata  # noqa: PLC0415
+    from trading.data.sources import fetch_close_history, fetch_ticker_metadata  # noqa: PLC0415
     from trading.publish.store import SupabaseStore, make_client  # noqa: PLC0415
 
     logging.basicConfig(level=logging.INFO)
-
-    now_et = pd.Timestamp.now(tz="America/New_York")
-    if not is_market_hours(now_et, config.PUBLISH_MARKET_OPEN, config.PUBLISH_MARKET_CLOSE):
-        logger.info("publish: outside market hours (%s) — skipping", now_et)
-        return 0
 
     if not config.SUPABASE_URL or not config.SUPABASE_SERVICE_KEY:
         logger.error("publish: SUPABASE_URL / SUPABASE_SERVICE_KEY not set — aborting")
         return 1
 
-    broker = IBKRBroker(host=config.IBKR_HOST, port=config.IBKR_PORT,
-                        client_id=config.IBKR_CLIENT_ID)
     store = SupabaseStore(make_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY))
-    summary = publish_once(
-        broker, store,
-        weights_dir=config.WEIGHTS_DIR, orders_dir=config.ORDERS_DIR,
-        asof=most_recent_friday(), today=now_et.normalize().tz_localize(None),
-        spy_close=fetch_spy_close(), fetch_metadata=fetch_ticker_metadata,
+    today = pd.Timestamp.now(tz="America/New_York").normalize().tz_localize(None)
+    summary = publish_from_audit(
+        store,
+        weights_dir=config.WEIGHTS_DIR,
+        orders_dir=config.ORDERS_DIR,
+        asof=most_recent_friday(),
+        today=today,
+        price_fetch=fetch_close_history,
+        fetch_metadata=fetch_ticker_metadata,
     )
     logger.info("publish: done — %s", summary)
     return 0
