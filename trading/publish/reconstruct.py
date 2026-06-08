@@ -67,10 +67,18 @@ def reconstruct_curve(history: list[dict], close_history: pd.DataFrame, spy_hist
     holdings/cash come from the latest rebalance with asof <= d; nav = cash +
     sum(shares * close). A missing/NaN close contributes zero (price comes in via
     the forward-filled frame from fetch_close_history).
+
+    The inception-date point is anchored to the starting capital (the first_build
+    record's pre-trade `nav`), i.e. holdings valued at cost basis on day 0 rather
+    than that day's close. Otherwise the baseline is a mark-to-close value and
+    total-return / day-P&L are measured off the wrong starting point (e.g. the
+    account was funded at $100,023 but the first close marks the just-bought
+    holdings at $99,199, inventing a ~$900 "gain" the next day).
     """
     if not history or close_history is None or len(close_history.index) == 0:
         return []
     start = inception_date(history)
+    start_nav = float(_first_build(history)["nav"])
     rows: list[dict] = []
     for raw_d in close_history.index:
         d = pd.Timestamp(raw_d).normalize()
@@ -89,9 +97,11 @@ def reconstruct_curve(history: list[dict], close_history: pd.DataFrame, spy_hist
                 if not pd.isna(px):
                     mv += shares * float(px)
         spy = spy_history.get(raw_d) if spy_history is not None else None
+        # Inception day reflects the capital deployed (cost basis), not the close.
+        nav = start_nav if d == start else cash + mv
         rows.append({
             "date": str(d.date()),
-            "nav": cash + mv,
+            "nav": nav,
             "spy_close": (float(spy) if spy is not None and not pd.isna(spy) else None),
         })
     return rows

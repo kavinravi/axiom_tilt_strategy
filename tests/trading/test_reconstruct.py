@@ -117,12 +117,12 @@ def test_reconstruct_curve_starts_at_inception(tmp_path):
 
 
 def test_reconstruct_curve_skips_missing_close(tmp_path):
-    hist = _curve_fixture(tmp_path)
-    idx = pd.to_datetime(["2026-06-05"]).normalize()
-    closes = pd.DataFrame({"AAA": [float("nan")], "SPY": [500.0]}, index=idx)
+    hist = _curve_fixture(tmp_path)  # first_build nav 1000, 5 AAA, cash residual 100
+    idx = pd.to_datetime(["2026-06-05", "2026-06-08"]).normalize()
+    closes = pd.DataFrame({"AAA": [180.0, float("nan")], "SPY": [500.0, 510.0]}, index=idx)
     curve = reconstruct.reconstruct_curve(hist, closes, closes["SPY"])
-    # AAA price missing -> contributes 0 market value -> nav == cash residual (100)
-    assert curve[0]["nav"] == 100.0
+    # 06-08 AAA price missing -> contributes 0 market value -> nav == cash residual (100)
+    assert curve[1]["nav"] == 100.0
 
 
 def test_reconstruct_curve_empty_history():
@@ -131,11 +131,28 @@ def test_reconstruct_curve_empty_history():
 
 def test_reconstruct_curve_ticker_absent_from_columns(tmp_path):
     hist = _curve_fixture(tmp_path)  # holds 5 AAA, cash residual 100
-    idx = pd.to_datetime(["2026-06-05"]).normalize()
-    closes = pd.DataFrame({"SPY": [500.0]}, index=idx)  # no AAA column at all
+    idx = pd.to_datetime(["2026-06-05", "2026-06-08"]).normalize()
+    closes = pd.DataFrame({"SPY": [500.0, 510.0]}, index=idx)  # no AAA column at all
     curve = reconstruct.reconstruct_curve(hist, closes, closes["SPY"])
-    # AAA absent from columns -> contributes 0 -> nav == cash residual
-    assert curve[0]["nav"] == 100.0
+    # 06-08 AAA absent from columns -> contributes 0 -> nav == cash residual
+    assert curve[1]["nav"] == 100.0
+
+
+def test_reconstruct_curve_inception_uses_starting_capital_not_close(tmp_path):
+    # Bought 5 AAA at avg 190 (notional 950) out of 1000 -> cash residual 50.
+    # The Friday close (170) is BELOW cost, so a mark-to-close baseline would invent
+    # a loss-then-gain; the inception point must be the starting capital instead.
+    od = tmp_path / "orders"
+    _write(od, "2026-06-05", {
+        "first_build": True, "nav": 1000.0, "post_positions": {"AAA": 5.0},
+        "fills": [{"ticker": "AAA", "side": "BUY", "quantity": 5.0, "avg_price": 190.0}],
+    })
+    hist = reconstruct.load_history(od)
+    idx = pd.to_datetime(["2026-06-05", "2026-06-08"]).normalize()
+    closes = pd.DataFrame({"AAA": [170.0, 200.0], "SPY": [500.0, 510.0]}, index=idx)
+    curve = reconstruct.reconstruct_curve(hist, closes, closes["SPY"])
+    assert curve[0]["nav"] == 1000.0          # starting capital, NOT 50 + 5*170 = 900
+    assert curve[1]["nav"] == 1050.0          # 06-08 marks to close: 50 + 5*200
 
 
 def test_reconstruct_curve_switches_holdings_on_rebalance(tmp_path):
