@@ -3,10 +3,10 @@ import { computeTurnover } from "./turnover";
 import type { WeeklyRow } from "./types";
 
 const rows: WeeklyRow[] = [
-  { asof_friday: "2026-05-29", ticker: "NVDA", target_weight: 0.1, k_probs: null },
-  { asof_friday: "2026-05-29", ticker: "AMD", target_weight: 0.08, k_probs: null },
-  { asof_friday: "2026-06-05", ticker: "NVDA", target_weight: 0.1, k_probs: null },
-  { asof_friday: "2026-06-05", ticker: "AVGO", target_weight: 0.07, k_probs: null },
+  { asof_friday: "2026-05-29", ticker: "NVDA", company_name: null, sector: null, target_weight: 0.1, k_probs: null },
+  { asof_friday: "2026-05-29", ticker: "AMD", company_name: null, sector: null, target_weight: 0.08, k_probs: null },
+  { asof_friday: "2026-06-05", ticker: "NVDA", company_name: null, sector: null, target_weight: 0.1, k_probs: null },
+  { asof_friday: "2026-06-05", ticker: "AVGO", company_name: null, sector: null, target_weight: 0.07, k_probs: null },
 ];
 
 describe("computeTurnover", () => {

@@ -111,6 +111,43 @@ def latest_fundamentals(tickers: list[str], asof: pd.Timestamp | None = None, nd
     return combined.reset_index(drop=True)
 
 
+def fetch_ticker_metadata(tickers, ndl=None) -> dict[str, dict]:
+    """Map ``ticker -> {"company_name", "sector"}`` from SHARADAR/TICKERS.
+
+    Best-effort: returns {} (or a partial map) on any failure so the publisher
+    never breaks just because metadata is unavailable. Unknown tickers are simply
+    omitted. ``ndl`` is injectable for tests."""
+    tickers = list(tickers)
+    if not tickers:
+        return {}
+    if ndl is None:
+        try:
+            ndl = _build_ndl()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ticker metadata: NDL client unavailable (%s)", exc)
+            return {}
+
+    out: dict[str, dict] = {}
+    for chunk in _chunk(tickers, 100):
+        try:
+            df = _retry(lambda c=chunk: ndl.get_table(
+                "SHARADAR/TICKERS", table="SF1", ticker=c, paginate=True))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ticker metadata fetch failed for %d tickers (%s)", len(chunk), exc)
+            continue
+        if df is None or len(df) == 0:
+            continue
+        df = df.drop_duplicates("ticker")
+        for _, row in df.iterrows():
+            name = row["name"] if "name" in df.columns else None
+            sector = row["sector"] if "sector" in df.columns else None
+            out[str(row["ticker"])] = {
+                "company_name": str(name) if pd.notna(name) else None,
+                "sector": str(sector) if pd.notna(sector) else None,
+            }
+    return out
+
+
 def latest_marketcap(
     tickers: list[str],
     asof: pd.Timestamp,

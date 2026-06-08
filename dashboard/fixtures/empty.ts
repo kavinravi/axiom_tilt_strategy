@@ -8,9 +8,9 @@ export const empty: Dataset = {
   equityCurve: [],
   holdings: [],
   weekly: [
-    { asof_friday: "2026-05-29", ticker: "NVDA", target_weight: 0.10, k_probs: KPROBS },
-    { asof_friday: "2026-05-29", ticker: "AAPL", target_weight: 0.08, k_probs: KPROBS },
-    { asof_friday: "2026-05-29", ticker: "MSFT", target_weight: 0.075, k_probs: KPROBS },
+    { asof_friday: "2026-05-29", ticker: "NVDA", company_name: "NVIDIA Corp", sector: "Technology", target_weight: 0.10, k_probs: KPROBS },
+    { asof_friday: "2026-05-29", ticker: "AAPL", company_name: "Apple Inc", sector: "Technology", target_weight: 0.08, k_probs: KPROBS },
+    { asof_friday: "2026-05-29", ticker: "MSFT", company_name: "Microsoft Corp", sector: "Technology", target_weight: 0.075, k_probs: KPROBS },
   ],
   executions: [],
 };

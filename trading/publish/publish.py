@@ -48,8 +48,14 @@ def _prior_weights(weights_dir, asof: str) -> dict[str, float]:
     return {str(k): float(v) for k, v in (payload.get("weights") or {}).items()}
 
 
-def publish_once(broker, store, *, weights_dir, orders_dir, asof, today, spy_close):
-    """Compute and write one snapshot. Returns a small summary dict."""
+def publish_once(broker, store, *, weights_dir, orders_dir, asof, today, spy_close,
+                 fetch_metadata=None):
+    """Compute and write one snapshot. Returns a small summary dict.
+
+    ``fetch_metadata`` is an optional callable ``tickers -> {ticker: {company_name,
+    sector}}`` (injected so tests stay network-free; main() passes the real
+    Sharadar fetcher). When None, holdings carry None name/sector.
+    """
     asof = str(pd.Timestamp(asof).date())
     today = pd.Timestamp(today).normalize()
     if today.tz is not None:  # make the contract explicit: operate on a tz-naive date
@@ -79,6 +85,15 @@ def publish_once(broker, store, *, weights_dir, orders_dir, asof, today, spy_clo
     last_weights = _prior_weights(weights_dir, asof)
     turnover = compute_turnover(target_weights, last_weights) if last_weights else None
 
+    # Ticker metadata (company name + sector) for everything we hold or target.
+    metadata: dict[str, dict] = {}
+    if fetch_metadata is not None:
+        tickers = sorted(set(positions) | set(target_weights))
+        try:
+            metadata = fetch_metadata(tickers) or {}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("publish: ticker metadata unavailable (%s)", exc)
+
     # 3. Equity history (for prior NAV, inception baselines, risk series).
     curve = store.read_equity_curve()
     prev_nav = _prev_nav(curve, today)
@@ -90,7 +105,7 @@ def publish_once(broker, store, *, weights_dir, orders_dir, asof, today, spy_clo
     navs = [float(p["nav"]) for p in curve if str(p["date"]) < today_str] + [nav]
 
     # 4. Metrics.
-    holdings = compute_holdings(positions, prices, target_weights, nav)
+    holdings = compute_holdings(positions, prices, target_weights, nav, metadata=metadata)
     day_pnl, day_pnl_pct = compute_day_pnl(nav, prev_nav)
     risk = compute_risk(navs)
     invested = sum(h["market_value"] for h in holdings)
@@ -117,7 +132,9 @@ def publish_once(broker, store, *, weights_dir, orders_dir, asof, today, spy_clo
     store.insert_weekly_portfolio(
         asof,
         [
-            {"asof_friday": asof, "ticker": t, "target_weight": w, "k_probs": k_probs}
+            {"asof_friday": asof, "ticker": t, "target_weight": w, "k_probs": k_probs,
+             "company_name": metadata.get(t, {}).get("company_name"),
+             "sector": metadata.get(t, {}).get("sector")}
             for t, w in target_weights.items()
         ],
     )
@@ -165,6 +182,7 @@ def main() -> int:
     import trading.config as config  # noqa: PLC0415
     from trading.broker.ibkr import IBKRBroker  # noqa: PLC0415
     from trading.data.snapshot import most_recent_friday  # noqa: PLC0415
+    from trading.data.sources import fetch_ticker_metadata  # noqa: PLC0415
     from trading.publish.store import SupabaseStore, make_client  # noqa: PLC0415
 
     logging.basicConfig(level=logging.INFO)
@@ -185,7 +203,7 @@ def main() -> int:
         broker, store,
         weights_dir=config.WEIGHTS_DIR, orders_dir=config.ORDERS_DIR,
         asof=most_recent_friday(), today=now_et.normalize().tz_localize(None),
-        spy_close=fetch_spy_close(),
+        spy_close=fetch_spy_close(), fetch_metadata=fetch_ticker_metadata,
     )
     logger.info("publish: done — %s", summary)
     return 0

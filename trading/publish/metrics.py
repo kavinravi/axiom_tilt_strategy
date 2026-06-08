@@ -13,11 +13,15 @@ def compute_holdings(
     prices: dict[str, float],
     target_weights: dict[str, float],
     nav: float,
+    metadata: dict[str, dict] | None = None,
 ) -> list[dict]:
     """Build the per-holding table for currently-held names, sorted by actual weight.
 
-    Skips zero-share positions. weight_actual = shares*price / nav.
+    Skips zero-share positions. weight_actual = shares*price / nav. ``metadata``
+    maps ticker -> {"company_name", "sector"}; absent names get None for both so
+    the row schema stays uniform.
     """
+    metadata = metadata or {}
     rows: list[dict] = []
     for ticker, shares in positions.items():
         shares = float(shares)
@@ -25,9 +29,12 @@ def compute_holdings(
             continue
         price = float(prices.get(ticker, 0.0))
         market_value = shares * price
+        meta = metadata.get(ticker, {})
         rows.append(
             {
                 "ticker": ticker,
+                "company_name": meta.get("company_name"),
+                "sector": meta.get("sector"),
                 "shares": shares,
                 "price": price,
                 "market_value": market_value,

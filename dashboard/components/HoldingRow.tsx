@@ -13,7 +13,10 @@ export function HoldingRow({ h }: { h: Holding }) {
   return (
     <div className="rounded-md bg-neutral-900 px-3 py-2 ring-1 ring-neutral-800">
       <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 text-left">
-        <span className="w-16 font-medium">{h.ticker}</span>
+        <span className="flex w-44 min-w-0 flex-col">
+          <span className="font-medium">{h.ticker}</span>
+          {h.company_name && <span className="truncate text-[11px] text-neutral-500">{h.company_name}</span>}
+        </span>
         <span className="relative h-3 flex-1 overflow-hidden rounded bg-neutral-800">
           <span className="absolute inset-y-0 left-0 bg-emerald-500" style={{ width: `${pctOfCap}%` }} />
         </span>
@@ -21,7 +24,8 @@ export function HoldingRow({ h }: { h: Holding }) {
         {noQuote && <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-300">no quote</span>}
       </button>
       {open && (
-        <div className="mt-2 grid grid-cols-2 gap-1 pl-16 text-xs text-neutral-400">
+        <div className="mt-2 grid grid-cols-2 gap-1 pl-3 text-xs text-neutral-400">
+          <span>Sector: {h.sector ?? "—"}</span>
           <span>Target: {fmtPct(h.weight_target ?? null)}</span>
           <span>Shares: {h.shares}</span>
           <span>Price: {fmtMoney(h.price)}</span>

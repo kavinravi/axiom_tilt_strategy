@@ -29,6 +29,21 @@ def test_compute_holdings_missing_price_is_zero_value():
     assert rows[0]["weight_target"] == 0.0
 
 
+def test_compute_holdings_attaches_company_name_and_sector():
+    meta = {"NVDA": {"company_name": "NVIDIA CORP", "sector": "Technology"}}
+    rows = compute_holdings({"NVDA": 10.0}, {"NVDA": 100.0}, {"NVDA": 0.1},
+                            nav=1000.0, metadata=meta)
+    assert rows[0]["company_name"] == "NVIDIA CORP"
+    assert rows[0]["sector"] == "Technology"
+
+
+def test_compute_holdings_metadata_absent_is_none_not_missing():
+    # keys are always present (None when no metadata) so the schema stays uniform
+    rows = compute_holdings({"AAA": 1.0}, {"AAA": 10.0}, {}, nav=100.0)
+    assert rows[0]["company_name"] is None
+    assert rows[0]["sector"] is None
+
+
 from trading.publish.metrics import compute_day_pnl, pct_change
 
 

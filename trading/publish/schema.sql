@@ -28,20 +28,28 @@ create table if not exists equity_curve (
 create table if not exists holdings (
   asof          timestamptz not null,
   ticker        text not null,
+  company_name  text,
+  sector        text,
   shares        double precision not null,
   price         double precision,
   market_value  double precision,
   weight_actual double precision,
   weight_target double precision
 );
+alter table holdings add column if not exists company_name text;
+alter table holdings add column if not exists sector text;
 
 create table if not exists weekly_portfolio (
   asof_friday   date not null,
   ticker        text not null,
+  company_name  text,
+  sector        text,
   target_weight double precision not null,
   k_probs       jsonb,
   primary key (asof_friday, ticker)
 );
+alter table weekly_portfolio add column if not exists company_name text;
+alter table weekly_portfolio add column if not exists sector text;
 
 create table if not exists executions (
   asof           date not null,

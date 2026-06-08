@@ -41,13 +41,15 @@ function HistoryInner() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-neutral-500">
-              <th>Ticker</th><th className="text-right">Weight</th>
+              <th>Ticker</th><th>Company</th><th>Sector</th><th className="text-right">Weight</th>
             </tr>
           </thead>
           <tbody>
             {data.weekly.map((r) => (
               <tr key={r.ticker} className="border-t border-neutral-800">
-                <td>{r.ticker}</td>
+                <td className="font-medium">{r.ticker}</td>
+                <td className="text-neutral-300">{r.company_name ?? "—"}</td>
+                <td className="text-neutral-400">{r.sector ?? "—"}</td>
                 <td className="text-right tabular-nums">{fmtPct(r.target_weight)}</td>
               </tr>
             ))}

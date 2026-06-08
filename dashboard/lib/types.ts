@@ -31,6 +31,8 @@ export interface EquityPoint {
 }
 export interface Holding {
   ticker: string;
+  company_name: string | null;
+  sector: string | null;
   shares: number;
   price: number | null;
   market_value: number | null;
@@ -40,6 +42,8 @@ export interface Holding {
 export interface WeeklyRow {
   asof_friday: string;
   ticker: string;
+  company_name: string | null;
+  sector: string | null;
   target_weight: number;
   k_probs: Record<string, number> | null;
 }
