@@ -65,6 +65,27 @@ def test_publish_from_audit_writes_curve_holdings_snapshot(tmp_path):
     assert store.executions["asof"] == asof             # orders file present
 
 
+def test_publish_from_audit_metadata_flows_to_holdings_and_weekly(tmp_path):
+    wdir, odir, asof = _setup(tmp_path)
+    idx = pd.to_datetime(["2026-06-05"]).normalize()
+    frame = pd.DataFrame({"AAA": [180.0], "SPY": [500.0]}, index=idx)
+
+    def price_fetch(tickers, start, end):
+        return frame.reindex(columns=sorted(set(tickers))).ffill()
+
+    def fake_metadata(tickers):
+        return {"AAA": {"company_name": "Alpha Corp", "sector": "Tech"}}
+
+    store = _RecordingStore()
+    publish_from_audit(store, weights_dir=wdir, orders_dir=odir, asof=asof,
+                       today=pd.Timestamp("2026-06-05"), price_fetch=price_fetch,
+                       fetch_metadata=fake_metadata)
+    assert store.holdings[0]["company_name"] == "Alpha Corp"
+    assert store.holdings[0]["sector"] == "Tech"
+    assert store.weekly["rows"][0]["company_name"] == "Alpha Corp"
+    assert store.weekly["rows"][0]["sector"] == "Tech"
+
+
 def test_publish_from_audit_no_broker_import(tmp_path, monkeypatch):
     # Guard: the audit path must never touch the IBKR broker.
     wdir, odir, asof = _setup(tmp_path)

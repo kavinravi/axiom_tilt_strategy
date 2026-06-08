@@ -163,6 +163,8 @@ def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fet
     """
     asof = str(pd.Timestamp(asof).date())
     today = pd.Timestamp(today).normalize()
+    if today.tz is not None:
+        today = today.tz_localize(None)
 
     history = load_history(orders_dir)
     holdings_shares = current_holdings(history)

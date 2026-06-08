@@ -6,7 +6,7 @@ frontend (Plan 2) can render it. **Outbound-only** — the VPS opens no inbound 
 ## Modules
 - `metrics.py` — pure functions (holdings, day P&L, returns, risk, turnover, execution quality).
 - `store.py` — `SupabaseStore`: idempotent writes over an injectable client.
-- `publish.py` — `publish_once` orchestrator + `main()` CLI (market-hours-guarded).
+- `publish.py` — `publish_from_audit` orchestrator (broker-free: reconstructs holdings/NAV/equity from `trading/audit/orders/` + yfinance closes) + `main()` CLI (no market-hours guard; gated by the daily systemd timer).
 - `backfill.py` — one-shot seed of weekly portfolios + executions from existing audit files.
 - `schema.sql` — apply once in the Supabase SQL editor (creates tables + enables RLS).
 
@@ -20,7 +20,7 @@ frontend (Plan 2) can render it. **Outbound-only** — the VPS opens no inbound 
 3. Seed history once: `python -m trading.publish.backfill`
 
 ## Run a publish
-`python -m trading.publish` — skips quietly outside US market hours; needs IB Gateway up.
+`python -m trading.publish` — broker-free; no market-hours guard; reads order audit + yfinance closes.
 
 ## systemd timer (on the VPS)
 `/etc/systemd/system/dashboard-publish.service`:
@@ -48,4 +48,4 @@ Persistent=false
 WantedBy=timers.target
 ```
 Enable: `sudo systemctl enable --now dashboard-publish.timer`
-(The `main()` market-hours guard is the backstop; the timer is the primary gate.)
+(The timer is the gate; `main()` has no market-hours guard.)
