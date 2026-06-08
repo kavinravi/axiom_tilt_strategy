@@ -26,7 +26,9 @@ class SupabaseStore:
             self._c.table("holdings").insert(rows).execute()
 
     def replace_equity_curve(self, rows: list[dict]) -> None:
-        self._c.table("equity_curve").delete().neq("date", "").execute()
+        # `date` is a Postgres DATE column, so the all-rows delete filter must be a
+        # valid date (an empty string fails to cast). Every real point is >= 1900.
+        self._c.table("equity_curve").delete().gte("date", "1900-01-01").execute()
         if rows:
             self._c.table("equity_curve").insert(rows).execute()
 

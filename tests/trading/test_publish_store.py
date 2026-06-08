@@ -38,6 +38,10 @@ class _FakeQuery:
     def neq(self, col, val):
         return self
 
+    def gte(self, col, val):
+        self._log.append(("gte", self._table, col, val))
+        return self
+
     def execute(self):
         return type("Res", (), {"data": self._data})()
 
@@ -79,15 +83,22 @@ def test_read_equity_curve_returns_client_data():
 
 
 def test_replace_equity_curve_deletes_then_inserts():
+    import datetime as _dt
+
     c = _FakeClient()
     rows = [{"date": "2026-06-05", "nav": 100.0, "spy_close": 500.0}]
     SupabaseStore(c).replace_equity_curve(rows)
     kinds = [e[0] for e in c.log]
-    assert kinds == ["delete", "insert"]
+    assert kinds == ["delete", "gte", "insert"]
+    # Regression: the all-rows delete filter must be a VALID date — Postgres rejects
+    # `date != ""` ("invalid input syntax for type date"). Confirm it parses as a date.
+    gte = next(e for e in c.log if e[0] == "gte")
+    assert gte[2] == "date"
+    _dt.date.fromisoformat(gte[3])  # raises ValueError if not an ISO date
 
 
 def test_replace_equity_curve_empty_skips_insert():
     c = _FakeClient()
     SupabaseStore(c).replace_equity_curve([])
     kinds = [e[0] for e in c.log]
-    assert kinds == ["delete"]
+    assert kinds == ["delete", "gte"]
