@@ -36,8 +36,12 @@ WEIGHT_SUM_TOL = 1e-6
 # WSL->Windows host IP (e.g. IBKR_HOST=172.18.0.1) and the VPS default (127.0.0.1) need no
 # code change. Verified 2026-06-03: paper Gateway reachable from WSL at 172.18.0.1:4002.
 IBKR_HOST = get_env("IBKR_HOST", default="127.0.0.1")
-IBKR_PORT = int(get_env("IBKR_PORT", default="4002"))   # 4002 paper / 4001 live (IB Gateway)
+IBKR_PORT = int(get_env("IBKR_PORT", default="4002"))   # 4002 paper / 4001 live (IB Gateway); used by the publisher
 IBKR_CLIENT_ID = int(get_env("IBKR_CLIENT_ID", default="11"))
+# Distinct paper/live ports so a paper rebalance can NEVER reach the live gateway.
+# run_rebalance picks the port by mode (see _select_broker); these are the IB Gateway defaults.
+IBKR_PAPER_PORT = int(get_env("IBKR_PAPER_PORT", default="4002"))
+IBKR_LIVE_PORT = int(get_env("IBKR_LIVE_PORT", default="4001"))
 
 # Safety rails
 KILL_SWITCH_FILE = TRADING_DIR / "KILL_SWITCH"   # if this file exists, abort all order placement

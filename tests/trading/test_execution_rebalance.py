@@ -63,6 +63,12 @@ class _Cfg:
     EXECUTION_MODE = "dryrun"
     KILL_SWITCH_FILE = Path("/nonexistent/KILL_SWITCH")
 
+    # IBKR connection — paper/live ports MUST differ (paper can't reach live)
+    IBKR_HOST = "127.0.0.1"
+    IBKR_PAPER_PORT = 4002
+    IBKR_LIVE_PORT = 4001
+    IBKR_CLIENT_ID = 11
+
     # Execution ladder
     LADDER_PASSIVE_WAIT_SEC = 0
     LADDER_MIDPRICE_WAIT_SEC = 0
@@ -216,26 +222,19 @@ def test_missing_weights_file_raises_file_not_found(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# paper/live mode without injected broker raises NotImplementedError
+# paper/live mode selects an IBKRBroker on the mode-appropriate port
 # ---------------------------------------------------------------------------
 
-def test_paper_mode_without_broker_raises_not_implemented(tmp_path):
-    """mode='paper' without injected broker raises NotImplementedError (Phase C)."""
-    weights = _make_valid_weights(n=15)
-    weights_dir = tmp_path / "weights"
-    orders_dir = tmp_path / "orders"
-    _write_weights_json(weights_dir, _ASOF, weights)
+def test_paper_mode_selects_ibkr_broker_on_paper_port(tmp_path):
+    """Phase C is wired: paper mode now selects an IBKRBroker on the PAPER port
+    (no longer NotImplementedError), and never the live port. Constructed without
+    connecting, so no network."""
+    from trading.execution.rebalance import _select_broker
     cfg = _Cfg()
-    cfg.KILL_SWITCH_FILE = tmp_path / "KILL_SWITCH_ABSENT"
-
-    with pytest.raises(NotImplementedError):
-        run_rebalance(
-            asof=_ASOF,
-            mode="paper",
-            config=cfg,
-            weights_dir=weights_dir,
-            orders_dir=orders_dir,
-        )
+    b = _select_broker("paper", cfg)
+    assert type(b).__name__ == "IBKRBroker"
+    assert b._port == cfg.IBKR_PAPER_PORT
+    assert b._port != cfg.IBKR_LIVE_PORT          # SAFETY: paper never hits live
 
 
 # ---------------------------------------------------------------------------

@@ -25,6 +25,27 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def _select_broker(mode: str, config: Any):
+    """Construct (but do NOT connect) the broker for ``mode``.
+
+    SAFETY: paper and live resolve to DISTINCT gateway ports
+    (``config.IBKR_PAPER_PORT`` vs ``config.IBKR_LIVE_PORT``), so a paper
+    rebalance can never reach the live gateway and place real orders. The IBKR
+    broker is created with ``readonly=False`` so it can submit orders; dryrun uses
+    the in-memory simulator.
+    """
+    mode = mode.lower()
+    if mode == "dryrun":
+        from trading.broker.dryrun import DryRunBroker  # noqa: PLC0415
+        return DryRunBroker()
+    if mode in ("paper", "live"):
+        from trading.broker.ibkr import IBKRBroker  # noqa: PLC0415
+        port = config.IBKR_LIVE_PORT if mode == "live" else config.IBKR_PAPER_PORT
+        return IBKRBroker(host=config.IBKR_HOST, port=port,
+                          client_id=config.IBKR_CLIENT_ID, readonly=False)
+    raise ValueError(f"unknown execution mode: {mode!r} (expected dryrun|paper|live)")
+
+
 def run_rebalance(
     asof: str | pd.Timestamp | None = None,
     *,
@@ -42,8 +63,9 @@ def run_rebalance(
     Steps
     -----
     1.  Resolve mode (mode arg > config.EXECUTION_MODE).
-    2.  Pick broker: dryrun if mode=="dryrun" or broker injected; for
-        paper/live raises NotImplementedError (IBKRBroker not yet implemented).
+    2.  Pick broker (when not injected): dryrun -> DryRunBroker; paper/live ->
+        IBKRBroker on the mode's port (paper and live ports are distinct, so a
+        paper rebalance can never reach the live gateway). See _select_broker.
     3.  broker.connect(); reconcile current_positions + nav.
     4.  Load frozen weights from weights_dir/<asof>.json (fail clearly if missing).
     5.  Fetch quotes for union(held tickers, target tickers).
@@ -94,16 +116,8 @@ def run_rebalance(
     # 2. Pick broker
     # ------------------------------------------------------------------
     if broker is None:
-        if mode == "dryrun":
-            from trading.broker.dryrun import DryRunBroker  # noqa: PLC0415
-            broker = DryRunBroker()
-            logger.info("run_rebalance: using DryRunBroker (mode=dryrun)")
-        else:
-            # IBKRBroker is Phase C — not yet implemented.
-            raise NotImplementedError(
-                f"mode='{mode}' requires IBKRBroker (Phase C, not yet implemented). "
-                "Use mode='dryrun' or inject a broker directly."
-            )
+        broker = _select_broker(mode, config)
+        logger.info("run_rebalance: using %s (mode=%s)", type(broker).__name__, mode)
 
     # ------------------------------------------------------------------
     # 3. Connect + reconcile
