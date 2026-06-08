@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 from trading.broker.base import Order
 
@@ -12,10 +13,14 @@ def target_shares(
     target_weights: dict[str, float],
     nav: float,
     prices: dict[str, float],
+    whole_shares: bool = False,
 ) -> dict[str, float]:
     """Compute target share quantities: shares_i = (w_i * nav) / price_i.
 
-    Fractional shares are used by default (no rounding).
+    Fractional shares by default. With ``whole_shares=True`` each target is
+    floored to an integer (IBKR rejects fractional orders via API — error
+    10243). Flooring never rounds up, so a name's notional can't exceed its
+    target dollar amount and the book can't exceed NAV (no buying-power reject).
     Tickers with missing or zero prices are skipped and logged.
 
     Returns
@@ -32,7 +37,8 @@ def target_shares(
         if price == 0.0:
             logger.warning("target_shares: zero price for %s — skipping", ticker)
             continue
-        result[ticker] = (weight * nav) / price
+        shares = (weight * nav) / price
+        result[ticker] = float(math.floor(shares)) if whole_shares else shares
     return result
 
 
@@ -42,6 +48,7 @@ def diff_to_orders(
     nav: float,
     prices: dict[str, float],
     min_order_notional: float = 1.0,
+    whole_shares: bool = False,
 ) -> list[Order]:
     """Compare target shares vs current positions and produce BUY/SELL orders.
 
@@ -75,7 +82,7 @@ def diff_to_orders(
     list[Order]
         List of BUY/SELL orders to bring portfolio to target.
     """
-    tgt_shares = target_shares(target_weights, nav, prices)
+    tgt_shares = target_shares(target_weights, nav, prices, whole_shares=whole_shares)
 
     # Union of all tickers across target and current positions
     all_tickers = set(tgt_shares.keys()) | set(current_positions.keys())
@@ -90,6 +97,12 @@ def diff_to_orders(
         t_shares = tgt_shares.get(ticker, 0.0)
         c_shares = current_positions.get(ticker, 0.0)
         delta = t_shares - c_shares
+        if whole_shares:
+            # Keep the traded quantity an integer even if the current position
+            # carries a fractional remainder from a legacy fill.
+            delta = float(round(delta))
+        if delta == 0:
+            continue
 
         # Skip dust
         notional = abs(delta * price)

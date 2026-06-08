@@ -179,6 +179,9 @@ def run_rebalance(
         current_positions=current_positions,
         nav=nav,
         prices=prices,
+        # Real brokers (paper/live) reject fractional orders via API (error 10243),
+        # so trade whole shares there. The dryrun simulator has no such limit.
+        whole_shares=(mode != "dryrun"),
     )
 
     # First build from cash: skip turnover check (100% turnover is expected)
