@@ -3,6 +3,7 @@ from __future__ import annotations
 
 K_CANDIDATES = [10, 20, 30, 50]
 MAX_WEIGHT = 0.10
+MIN_ALLOCATION = 0.01  # post-blend floor: prune sub-1% dust, band-project survivors to [1%, MAX_WEIGHT]
 EPS = 1e-8
 REGIME_FEATURES = [
     "macro_vixcls", "macro_dgs10", "macro_t10y2y",

@@ -8,12 +8,13 @@ re-cap needed (matches the backtest).
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from src.strategy.constants import EPS, K_CANDIDATES, MAX_WEIGHT
+from src.strategy.constants import EPS, K_CANDIDATES, MAX_WEIGHT, MIN_ALLOCATION
 from src.utils.rl_env import project_to_simplex
 
 
@@ -49,3 +50,77 @@ def ensemble_weights(scored_df: pd.DataFrame, k_probs: dict,
         for idv, wt in wK.items():
             combined[idv] = combined.get(idv, 0.0) + p * wt
     return {idv: wt for idv, wt in combined.items() if wt > EPS}
+
+
+def band_water_fill(base, floor: float = MIN_ALLOCATION,
+                    cap: float = MAX_WEIGHT) -> np.ndarray:
+    """Project a positive-tilt target onto {w : floor<=w<=cap, sum w = 1}.
+
+    `base` is any non-negative tilt (mcaps, or already-blended weights). It is
+    normalised, then out-of-band names are iteratively clamped (sticky pins) and
+    the residual redistributed across still-free names proportional to their
+    base, preserving the tilt. A final slack-based finalizer repairs float
+    residual without violating the band. Raises if the band is infeasible for
+    n names (needs n*floor <= 1 <= n*cap)."""
+    base = np.asarray(base, dtype=np.float64)
+    n = len(base)
+    if n * cap < 1.0 - 1e-12 or n * floor > 1.0 + 1e-12:
+        raise ValueError(
+            f"infeasible band: n={n}, floor={floor}, cap={cap} "
+            f"(need n*cap>=1>=n*floor)"
+        )
+
+    clean = np.where(np.isnan(base) | (base <= 0.0), 0.0, base)
+    tilt = np.full(n, 1.0 / n) if clean.sum() <= 0 else clean / clean.sum()
+
+    w = tilt.copy()
+    pinned = np.zeros(n, dtype=bool)
+    for _ in range(2 * n + 5):
+        over = (w > cap + 1e-15) & ~pinned
+        under = (w < floor - 1e-15) & ~pinned
+        if not over.any() and not under.any():
+            break
+        w[over] = cap
+        w[under] = floor
+        pinned |= over | under
+        free = ~pinned
+        if not free.any():
+            break
+        residual = 1.0 - w[pinned].sum()
+        fb = tilt[free]
+        w[free] = (residual / free.sum() if fb.sum() <= 0
+                   else residual * fb / fb.sum())
+
+    # Finalizer: repair float residual by moving only into available slack.
+    for _ in range(n + 5):  # converges in <=2 iterations analytically; budget is defensive
+        w = np.clip(w, floor, cap)
+        residual = 1.0 - w.sum()
+        if abs(residual) < 1e-12:
+            break
+        slack = (cap - w) if residual > 0 else (w - floor)
+        s = slack.sum()
+        if s <= 1e-15:
+            break
+        w = w + residual * slack / s
+    return w
+
+
+def apply_min_allocation(weights: dict, floor: float = MIN_ALLOCATION,
+                         cap: float = MAX_WEIGHT) -> dict[Any, float]:
+    """Impose a minimum allocation on a blended book: drop the sub-`floor` dust,
+    then band-project the survivors onto [floor, cap] summing to 1 (their blend
+    weights stay the tilt). Single dict in, {id: weight} out.
+
+    Keeps every name whose blended weight clears `floor`; never holds fewer than
+    ceil(1/cap) names so the band stays feasible (a guard that does not bind in
+    practice — the live blend always leaves well above that many names)."""
+    if not weights:
+        return {}
+    items = sorted(weights.items(), key=lambda kv: kv[1], reverse=True)
+    n_above = sum(1 for _, wt in items if wt >= floor)
+    min_feasible = math.ceil(1.0 / cap)            # need >= 1/cap names to fill to 1 under the cap
+    n_hold = min(max(n_above, min_feasible), len(items))
+    held = items[:n_hold]
+    w = band_water_fill(np.asarray([wt for _, wt in held], dtype=np.float64),
+                        floor=floor, cap=cap)
+    return {idv: float(min(max(wt, floor), cap)) for (idv, _), wt in zip(held, w)}

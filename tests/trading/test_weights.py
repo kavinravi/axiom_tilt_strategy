@@ -86,6 +86,15 @@ def test_weight_sum_close_to_one(asof, snapshot, regime_row, real_model):
     )
 
 
+def test_min_weight_at_least_min_allocation(asof, snapshot, regime_row, real_model):
+    from trading.config import MIN_ALLOCATION
+    from trading.weights import compute_target_weights
+    result = compute_target_weights(asof=asof, snapshot=snapshot,
+                                    regime_row=regime_row, model=real_model)
+    smallest = min(result["weights"].values())
+    assert smallest >= MIN_ALLOCATION - 1e-9, f"min weight = {smallest}"
+
+
 def test_max_weight_at_most_cap(asof, snapshot, regime_row, real_model):
     from trading.weights import compute_target_weights
     result = compute_target_weights(asof=asof, snapshot=snapshot,

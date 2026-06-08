@@ -1,7 +1,7 @@
 """Configuration for the live trading system (single place for paths + sources)."""
 from __future__ import annotations
 
-from src.strategy.constants import K_CANDIDATES, MAX_WEIGHT
+from src.strategy.constants import K_CANDIDATES, MAX_WEIGHT, MIN_ALLOCATION
 from src.utils.env import get_env
 from src.utils.io import repo_root
 

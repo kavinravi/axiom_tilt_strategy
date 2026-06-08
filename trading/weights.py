@@ -21,12 +21,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.strategy.allocate import ensemble_weights
+from src.strategy.allocate import apply_min_allocation, ensemble_weights
 from src.strategy.factors import score_universe
 from src.strategy.k_selector import load_model, predict_k_probs
 from trading.config import (
     MAX_HOLDINGS,
     MAX_WEIGHT,
+    MIN_ALLOCATION,
     MIN_HOLDINGS,
     MODEL_PATH,
     WEIGHT_SUM_TOL,
@@ -124,7 +125,8 @@ def compute_target_weights(
     4.  regime_row → build_current_regime_row(asof) (fetches FRED).
     5.  model → load_model(MODEL_PATH).
     6.  k_probs → predict_k_probs(model, regime_row).
-    7.  weights → ensemble_weights(scored, k_probs, id_col="ticker").
+    7.  blend   → ensemble_weights(scored, k_probs, id_col="ticker").
+    7b. weights → apply_min_allocation(blend) (prune sub-1% dust, band to [1%,10%]).
     8.  freeze_weights(weights, k_probs, asof) → audit JSON.
     9.  return result dict.
 
@@ -159,8 +161,14 @@ def compute_target_weights(
     # Step 6 — regime-conditioned K-probabilities
     k_probs: dict[int, float] = predict_k_probs(model, regime_row)
 
-    # Step 7 — probability-weighted ensemble of top-K portfolios
-    weights: dict[Any, float] = ensemble_weights(scored, k_probs, id_col="ticker")
+    # Step 7 — probability-weighted ensemble of top-K portfolios (the ML blend)
+    blend: dict[Any, float] = ensemble_weights(scored, k_probs, id_col="ticker")
+
+    # Step 7b — impose the minimum allocation: prune the sub-1% dust the blend
+    # leaves in its tail, then band-project the survivors to [MIN_ALLOCATION, MAX_WEIGHT].
+    weights: dict[Any, float] = apply_min_allocation(
+        blend, floor=MIN_ALLOCATION, cap=MAX_WEIGHT
+    )
 
     # Step 8 — persist to audit directory
     freeze_weights(weights, k_probs, asof)
