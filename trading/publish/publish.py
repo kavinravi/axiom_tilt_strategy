@@ -1,8 +1,10 @@
-"""Orchestrate one publish: broker + audit files -> metrics -> Supabase.
+"""Orchestrate one publish: audit files (+ optional broker) -> metrics -> Supabase.
 
-publish_once is fully injectable (broker, store, dirs, dates, spy_close) so tests
-run against DryRunBroker + a fake store with no network. main() wires the real
-IBKRBroker + SupabaseStore for the systemd timer.
+publish_from_audit reconstructs holdings/NAV/equity from the order audit + injected
+prices (no broker); main() wires the real yfinance fetchers + SupabaseStore for the
+daily systemd timer. publish_once is the older broker-based path, retained (with
+is_market_hours) for tests and a possible future broker truth-up; both are fully
+injectable so tests run against fakes with no network.
 """
 from __future__ import annotations
 
