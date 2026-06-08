@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 import pandas as pd
+import pytest
 
 from trading.publish import reconstruct
 
@@ -72,7 +73,6 @@ def test_cash_after_no_first_build_raises(tmp_path):
     _write(od, "2026-06-05", {"first_build": False, "nav": 1.0,
                               "post_positions": {}, "fills": []})
     hist = reconstruct.load_history(od)
-    import pytest
     with pytest.raises(ValueError):
         reconstruct.cash_after(hist)
 
@@ -85,3 +85,78 @@ def test_inception_date_is_first_build_asof(tmp_path):
                               "post_positions": {"AAA": 5.0}, "fills": []})
     hist = reconstruct.load_history(od)
     assert reconstruct.inception_date(hist) == pd.Timestamp("2026-06-05")
+
+
+def _curve_fixture(tmp_path):
+    od = tmp_path / "orders"
+    _write(od, "2026-06-05", {
+        "first_build": True, "nav": 1000.0, "post_positions": {"AAA": 5.0},
+        "fills": [{"ticker": "AAA", "side": "BUY", "quantity": 5.0, "avg_price": 180.0}],
+    })
+    return reconstruct.load_history(od)
+
+
+def test_reconstruct_curve_single_rebalance(tmp_path):
+    hist = _curve_fixture(tmp_path)          # cash residual = 100, holds 5 AAA
+    idx = pd.to_datetime(["2026-06-05", "2026-06-08"]).normalize()
+    closes = pd.DataFrame({"AAA": [180.0, 200.0], "SPY": [500.0, 510.0]}, index=idx)
+    curve = reconstruct.reconstruct_curve(hist, closes, closes["SPY"])
+    assert [p["date"] for p in curve] == ["2026-06-05", "2026-06-08"]
+    # day 1: 100 + 5*180 = 1000 ; day 2: 100 + 5*200 = 1100
+    assert curve[0]["nav"] == 1000.0
+    assert curve[1]["nav"] == 1100.0
+    assert curve[0]["spy_close"] == 500.0
+
+
+def test_reconstruct_curve_starts_at_inception(tmp_path):
+    hist = _curve_fixture(tmp_path)
+    idx = pd.to_datetime(["2026-06-01", "2026-06-05"]).normalize()  # one day pre-inception
+    closes = pd.DataFrame({"AAA": [170.0, 180.0], "SPY": [490.0, 500.0]}, index=idx)
+    curve = reconstruct.reconstruct_curve(hist, closes, closes["SPY"])
+    assert [p["date"] for p in curve] == ["2026-06-05"]  # pre-inception day dropped
+
+
+def test_reconstruct_curve_skips_missing_close(tmp_path):
+    hist = _curve_fixture(tmp_path)
+    idx = pd.to_datetime(["2026-06-05"]).normalize()
+    closes = pd.DataFrame({"AAA": [float("nan")], "SPY": [500.0]}, index=idx)
+    curve = reconstruct.reconstruct_curve(hist, closes, closes["SPY"])
+    # AAA price missing -> contributes 0 market value -> nav == cash residual (100)
+    assert curve[0]["nav"] == 100.0
+
+
+def test_reconstruct_curve_empty_history():
+    assert reconstruct.reconstruct_curve([], pd.DataFrame(), pd.Series(dtype=float)) == []
+
+
+def test_reconstruct_curve_ticker_absent_from_columns(tmp_path):
+    hist = _curve_fixture(tmp_path)  # holds 5 AAA, cash residual 100
+    idx = pd.to_datetime(["2026-06-05"]).normalize()
+    closes = pd.DataFrame({"SPY": [500.0]}, index=idx)  # no AAA column at all
+    curve = reconstruct.reconstruct_curve(hist, closes, closes["SPY"])
+    # AAA absent from columns -> contributes 0 -> nav == cash residual
+    assert curve[0]["nav"] == 100.0
+
+
+def test_reconstruct_curve_switches_holdings_on_rebalance(tmp_path):
+    od = tmp_path / "orders"
+    _write(od, "2026-06-05", {
+        "first_build": True, "nav": 1000.0, "post_positions": {"AAA": 5.0},
+        "fills": [{"ticker": "AAA", "side": "BUY", "quantity": 5.0, "avg_price": 180.0}],
+    })  # cash after = 1000 - 5*180 = 100
+    _write(od, "2026-06-12", {
+        "first_build": False, "nav": 0.0, "post_positions": {"AAA": 2.0, "BBB": 4.0},
+        "fills": [
+            {"ticker": "AAA", "side": "SELL", "quantity": 3.0, "avg_price": 200.0},
+            {"ticker": "BBB", "side": "BUY", "quantity": 4.0, "avg_price": 100.0},
+        ],
+    })  # cash after both = 100 + 3*200 - 4*100 = 300
+    hist = reconstruct.load_history(od)
+    idx = pd.to_datetime(["2026-06-08", "2026-06-12"]).normalize()
+    closes = pd.DataFrame(
+        {"AAA": [200.0, 210.0], "BBB": [100.0, 110.0], "SPY": [500.0, 510.0]}, index=idx)
+    curve = reconstruct.reconstruct_curve(hist, closes, closes["SPY"])
+    # 06-08: only first rebalance applies -> 5 AAA, cash 100 -> 100 + 5*200 = 1100
+    # 06-12: both apply -> 2 AAA + 4 BBB, cash 300 -> 300 + 2*210 + 4*110 = 1160
+    assert curve[0]["nav"] == 1100.0
+    assert curve[1]["nav"] == 1160.0
