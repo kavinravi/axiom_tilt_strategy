@@ -20,6 +20,12 @@ from trading.publish.metrics import (
     compute_turnover,
     pct_change,
 )
+from trading.publish.reconstruct import (
+    current_holdings,
+    inception_date,
+    load_history,
+    reconstruct_curve,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +145,97 @@ def publish_once(broker, store, *, weights_dir, orders_dir, asof, today, spy_clo
         ],
     )
 
+    orders_path = Path(orders_dir) / f"{asof}.json"
+    if orders_path.exists():
+        exec_rows = compute_execution_quality(_load_json(orders_path))
+        store.insert_executions(asof, [{**r, "asof": asof} for r in exec_rows])
+
+    return {"asof": asof, "nav": nav, "n_holdings": len(holdings)}
+
+
+def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fetch,
+                       fetch_metadata=None):
+    """Compute and write one snapshot from the order audit + injected prices.
+
+    `price_fetch(tickers, start, end) -> DataFrame` returns forward-filled daily
+    closes indexed by normalized date, one column per ticker (see
+    sources.fetch_close_history). No broker is contacted. Returns a summary dict.
+    """
+    asof = str(pd.Timestamp(asof).date())
+    today = pd.Timestamp(today).normalize()
+
+    history = load_history(orders_dir)
+    holdings_shares = current_holdings(history)
+
+    weights_payload = _load_json(Path(weights_dir) / f"{asof}.json")
+    target_weights = {str(k): float(v) for k, v in (weights_payload.get("weights") or {}).items()}
+    k_probs = weights_payload.get("k_probs") or {}
+    regime_features = weights_payload.get("regime_features")
+    last_weights = _prior_weights(weights_dir, asof)
+    turnover = compute_turnover(target_weights, last_weights) if last_weights else None
+
+    # Every ticker ever held (for the historical curve) + currently held + SPY.
+    ever: set[str] = set()
+    for rec in history:
+        ever |= {str(t) for t in (rec.get("post_positions") or {})}
+    tickers = sorted(ever | set(holdings_shares) | set(target_weights))
+    start = inception_date(history) if history else today
+    closes = price_fetch(tickers + ["SPY"], start, today + pd.Timedelta(days=1))
+    spy_history = closes["SPY"] if "SPY" in closes.columns else pd.Series(dtype=float)
+
+    curve = reconstruct_curve(history, closes, spy_history)
+    navs = [p["nav"] for p in curve]
+    nav = navs[-1] if navs else 0.0
+    prev_nav = navs[-2] if len(navs) >= 2 else None
+
+    latest_closes = {
+        t: float(closes[t].iloc[-1]) for t in holdings_shares
+        if t in closes.columns and not pd.isna(closes[t].iloc[-1])
+    }
+
+    metadata: dict[str, dict] = {}
+    if fetch_metadata is not None:
+        try:
+            metadata = fetch_metadata(sorted(set(holdings_shares) | set(target_weights))) or {}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("publish: ticker metadata unavailable (%s)", exc)
+
+    holdings = compute_holdings(holdings_shares, latest_closes, target_weights, nav, metadata=metadata)
+    day_pnl, day_pnl_pct = compute_day_pnl(nav, prev_nav)
+    risk = compute_risk(navs)
+    invested = sum(h["market_value"] for h in holdings)
+    inception_nav = navs[0] if navs else nav
+    inception_spy = next((p["spy_close"] for p in curve if p["spy_close"] is not None), None)
+    spy_now = curve[-1]["spy_close"] if curve else None
+    today_str = str(today.date())
+
+    store.replace_equity_curve(curve)
+    store.upsert_snapshot(
+        {
+            "asof": today_str,
+            "nav": nav,
+            "day_pnl": day_pnl,
+            "day_pnl_pct": day_pnl_pct,
+            "total_return": pct_change(nav, inception_nav),
+            "spy_return": pct_change(spy_now, inception_spy),
+            "n_positions": len(holdings),
+            "invested_pct": (invested / nav) if nav > 0 else None,
+            "k_probs": k_probs,
+            "regime_features": regime_features,
+            "risk": risk,
+            "turnover": turnover,
+        }
+    )
+    store.replace_holdings([{**h, "asof": today_str} for h in holdings])
+    store.insert_weekly_portfolio(
+        asof,
+        [
+            {"asof_friday": asof, "ticker": t, "target_weight": w, "k_probs": k_probs,
+             "company_name": metadata.get(t, {}).get("company_name"),
+             "sector": metadata.get(t, {}).get("sector")}
+            for t, w in target_weights.items()
+        ],
+    )
     orders_path = Path(orders_dir) / f"{asof}.json"
     if orders_path.exists():
         exec_rows = compute_execution_quality(_load_json(orders_path))
