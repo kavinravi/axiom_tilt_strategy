@@ -384,3 +384,34 @@ def fetch_spy_weekly(index: pd.DatetimeIndex, end: pd.Timestamp) -> pd.Series:
     except Exception as exc:  # noqa: BLE001
         logger.warning("FRED SPY unavailable (%s); falling back to yfinance SPY", exc)
         return _yf_spy(index, end)
+
+
+def fetch_close_history(tickers, start, end, download=None) -> pd.DataFrame:
+    """Daily closes for `tickers` over [start, end), forward-filled.
+
+    Returns a DataFrame indexed by normalized date, one column per ticker (sorted).
+    `download` is injected in tests; defaults to yfinance.download.
+    Leading NaNs (no trading data before a ticker's first available date) are NOT filled.
+    """
+    tickers = sorted(set(tickers))
+    if not tickers:
+        return pd.DataFrame()
+    if download is None:
+        import yfinance as yf  # noqa: PLC0415
+        download = yf.download
+    raw = _retry(lambda: download(
+        tickers, start=str(pd.Timestamp(start).date()),
+        end=str(pd.Timestamp(end).date()), interval="1d",
+        progress=False, auto_adjust=False, threads=False,
+    ))
+    # Multi-ticker yfinance returns a (field, ticker) column MultiIndex; single
+    # ticker returns flat columns. Normalize to a Close-only, ticker-columned frame.
+    if isinstance(raw.columns, pd.MultiIndex):
+        close = raw["Close"]
+    elif "Close" in raw.columns:
+        close = raw[["Close"]].rename(columns={"Close": tickers[0]})
+    else:
+        logger.warning("fetch_close_history: unexpected column structure %s; downstream NaNs likely", list(raw.columns))
+        close = raw
+    close.index = pd.to_datetime(close.index).normalize()
+    return close.reindex(columns=tickers).ffill()
