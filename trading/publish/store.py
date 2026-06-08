@@ -25,6 +25,11 @@ class SupabaseStore:
         if rows:
             self._c.table("holdings").insert(rows).execute()
 
+    def replace_equity_curve(self, rows: list[dict]) -> None:
+        self._c.table("equity_curve").delete().neq("date", "").execute()
+        if rows:
+            self._c.table("equity_curve").insert(rows).execute()
+
     def insert_weekly_portfolio(self, asof_friday: str, rows: list[dict]) -> None:
         self._c.table("weekly_portfolio").delete().eq("asof_friday", asof_friday).execute()
         if rows:

@@ -76,3 +76,18 @@ def test_read_equity_curve_returns_client_data():
     rows = [{"date": "2026-06-01", "nav": 100.0, "spy_close": 5000.0}]
     store = SupabaseStore(_FakeClient(equity_rows=rows))
     assert store.read_equity_curve() == rows
+
+
+def test_replace_equity_curve_deletes_then_inserts():
+    c = _FakeClient()
+    rows = [{"date": "2026-06-05", "nav": 100.0, "spy_close": 500.0}]
+    SupabaseStore(c).replace_equity_curve(rows)
+    kinds = [e[0] for e in c.log]
+    assert kinds == ["delete", "insert"]
+
+
+def test_replace_equity_curve_empty_skips_insert():
+    c = _FakeClient()
+    SupabaseStore(c).replace_equity_curve([])
+    kinds = [e[0] for e in c.log]
+    assert kinds == ["delete"]
