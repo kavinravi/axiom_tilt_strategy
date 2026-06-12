@@ -11,6 +11,7 @@ import { RegimeBar } from "@/components/RegimeBar";
 import { Empty } from "@/components/Empty";
 import { AsOf } from "@/components/AsOf";
 import { SectorComparison } from "@/components/SectorComparison";
+import { WeekVsSpyCard } from "@/components/WeekVsSpyCard";
 import { aggregateSectors } from "@/lib/sectors";
 
 const RANGES = ["1W", "1M", "3M", "All"] as const;
@@ -69,6 +70,7 @@ function NowInner() {
         <StatCard label="Total Return" value={fmtPct(s.total_return)} sub={`SPY ${fmtPct(s.spy_return)}`} tone={totTone} />
         <StatCard label="Invested" value={fmtPct(s.invested_pct)} />
       </div>
+      <WeekVsSpyCard week={s.week_vs_spy} />
       {curve.length > 1 ? (
         <div className="space-y-2">
           <div className="flex justify-end gap-1">

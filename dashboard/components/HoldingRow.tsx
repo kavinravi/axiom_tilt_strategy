@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import type { Holding } from "@/lib/types";
-import { fmtMoney, fmtPct } from "@/lib/format";
+import { fmtMoney, fmtPct, fmtSignedMoney } from "@/lib/format";
 
 const CAP = 0.10;
 
@@ -10,6 +10,9 @@ export function HoldingRow({ h }: { h: Holding }) {
   const w = h.weight_actual ?? 0;
   const noQuote = (h.price ?? 0) === 0 && h.shares > 0;
   const pctOfCap = Math.min(w / CAP, 1) * 100;
+  const dayPnl = h.daily_pnl ?? null;
+  const dayTone =
+    dayPnl == null ? "text-neutral-500" : dayPnl >= 0 ? "text-emerald-400" : "text-red-400";
   return (
     <div className="rounded-md bg-neutral-900 px-3 py-2 ring-1 ring-neutral-800">
       <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 text-left">
@@ -20,6 +23,11 @@ export function HoldingRow({ h }: { h: Holding }) {
         <span className="relative h-3 flex-1 overflow-hidden rounded bg-neutral-800">
           <span className="absolute inset-y-0 left-0 bg-emerald-500" style={{ width: `${pctOfCap}%` }} />
         </span>
+        {dayPnl != null && (
+          <span className={`w-20 text-right text-xs tabular-nums ${dayTone}`}>
+            {fmtSignedMoney(dayPnl)}
+          </span>
+        )}
         <span className="w-14 text-right text-sm tabular-nums">{fmtPct(w)}</span>
         {noQuote && <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-300">no quote</span>}
       </button>
@@ -30,6 +38,14 @@ export function HoldingRow({ h }: { h: Holding }) {
           <span>Shares: {h.shares}</span>
           <span>Price: {fmtMoney(h.price)}</span>
           <span>Value: {fmtMoney(h.market_value)}</span>
+          <span>Avg cost: {fmtMoney(h.avg_cost ?? null)}</span>
+          <span className={dayTone}>Day P&L: {fmtSignedMoney(dayPnl)}</span>
+          <span className={
+            (h.unrealized_pnl ?? 0) >= 0 && h.unrealized_pnl != null
+              ? "text-emerald-400" : h.unrealized_pnl != null ? "text-red-400" : ""
+          }>
+            Unrealized: {fmtSignedMoney(h.unrealized_pnl ?? null)}
+          </span>
         </div>
       )}
     </div>

@@ -11,3 +11,21 @@ describe("format", () => {
     expect(asOfET("2026-06-08T19:00:00+00:00")).toBe("as of 3:00 PM ET");
   });
 });
+
+import { fmtSignedMoney } from "./format";
+
+describe("fmtSignedMoney", () => {
+  it("formats positive with explicit plus", () => {
+    expect(fmtSignedMoney(1234.5)).toBe("+$1,234.50");
+  });
+  it("formats negative with minus", () => {
+    expect(fmtSignedMoney(-87.5)).toBe("-$87.50");
+  });
+  it("zero is positive-signed", () => {
+    expect(fmtSignedMoney(0)).toBe("+$0.00");
+  });
+  it("null/undefined render as dash", () => {
+    expect(fmtSignedMoney(null)).toBe("—");
+    expect(fmtSignedMoney(undefined)).toBe("—");
+  });
+});

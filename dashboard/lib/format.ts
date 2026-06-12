@@ -4,6 +4,11 @@ export function fmtMoney(n: number | null | undefined): string {
   if (n === null || n === undefined) return DASH;
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
+export function fmtSignedMoney(n: number | null | undefined): string {
+  if (n === null || n === undefined) return DASH;
+  const s = Math.abs(n).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  return `${n >= 0 ? "+" : "-"}${s}`;
+}
 export function fmtPct(n: number | null | undefined, digits = 2): string {
   if (n === null || n === undefined) return DASH;
   return `${(n * 100).toFixed(digits)}%`;

@@ -10,6 +10,13 @@ export interface Turnover {
   dropped: string[];
   turnover_frac: number;
 }
+// Trading-week-to-date vs SPY, baselined on the prior week's last close.
+export interface WeekVsSpy {
+  baseline_date: string;
+  portfolio_return: number | null;
+  spy_return: number | null;
+  excess_return: number | null;
+}
 export interface Snapshot {
   asof: string;
   nav: number;
@@ -17,6 +24,7 @@ export interface Snapshot {
   day_pnl_pct: number | null;
   total_return: number | null;
   spy_return: number | null;
+  week_vs_spy?: WeekVsSpy | null;
   n_positions: number | null;
   invested_pct: number | null;
   k_probs: Record<string, number> | null;
@@ -38,6 +46,10 @@ export interface Holding {
   market_value: number | null;
   weight_actual: number | null;
   weight_target: number | null;
+  // IB-mobile-style P&L from the broker account channel (absent pre-go-live).
+  avg_cost?: number | null;
+  unrealized_pnl?: number | null;
+  daily_pnl?: number | null;
 }
 export interface WeeklyRow {
   asof_friday: string;
