@@ -367,6 +367,74 @@ def test_publish_live_account_pnl_failure_falls_back_to_holdings_sum(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# publish_live — active book vs frozen Friday weights
+# ---------------------------------------------------------------------------
+
+def _write_two_weeks(wdir: Path):
+    wdir.mkdir(parents=True, exist_ok=True)
+    (wdir / "2026-06-05.json").write_text(json.dumps(    # executed Monday 06-08
+        {"asof": "2026-06-05", "k_probs": {"10": 1.0},
+         "weights": {"AAA": 0.6, "BBB": 0.4}}))
+    (wdir / "2026-06-12.json").write_text(json.dumps(    # frozen Fri, trades Monday 06-15
+        {"asof": "2026-06-12", "k_probs": {"20": 1.0},
+         "weights": {"AAA": 0.5, "CCC": 0.5}}))
+
+
+def test_publish_live_targets_from_active_book_weekly_from_frozen(tmp_path):
+    # Saturday after the freeze: holdings still reflect the 06-05 book, so
+    # per-holding targets must come from 06-05; the weekly plan / regime call /
+    # turnover preview from the newly frozen 06-12 file.
+    _write_two_weeks(tmp_path / "weights")
+    broker = DryRunBroker(positions={"AAA": 60.0, "BBB": 40.0}, nav=10_000.0,
+                          quotes={"AAA": (99.5, 100.5), "BBB": (99.5, 100.5)})
+    store = _RecordingStore()
+
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
+                 orders_dir=tmp_path / "orders", asof="2026-06-12",
+                 active_asof="2026-06-05",
+                 today=pd.Timestamp("2026-06-13"), spy_last=5100.0)
+
+    targets = {h["ticker"]: h["weight_target"] for h in store.holdings}
+    assert targets == {"AAA": 0.6, "BBB": 0.4}            # active book, not next week
+    assert store.weekly["asof_friday"] == "2026-06-12"
+    assert {r["ticker"] for r in store.weekly["rows"]} == {"AAA", "CCC"}
+    assert store.snapshot["k_probs"] == {"20": 1.0}       # regime call = newest
+    assert store.snapshot["turnover"]["added"] == ["CCC"]
+    assert store.snapshot["turnover"]["dropped"] == ["BBB"]
+
+
+def test_publish_live_missing_frozen_weights_falls_back_to_active(tmp_path):
+    # Friday BEFORE the 18:00 freeze: weights/<this Friday>.json doesn't exist
+    # yet. Must not crash — everything falls back to the active week.
+    wdir = tmp_path / "weights"
+    wdir.mkdir(parents=True)
+    (wdir / "2026-06-05.json").write_text(json.dumps(
+        {"asof": "2026-06-05", "k_probs": {"10": 1.0}, "weights": {"AAA": 1.0}}))
+    broker = DryRunBroker(positions={"AAA": 100.0}, nav=10_000.0,
+                          quotes={"AAA": (99.5, 100.5)})
+    store = _RecordingStore()
+
+    summary = publish_live(broker, store, weights_dir=wdir,
+                           orders_dir=tmp_path / "orders", asof="2026-06-12",
+                           active_asof="2026-06-05",
+                           today=pd.Timestamp("2026-06-12"), spy_last=5100.0)
+
+    assert summary["asof"] == "2026-06-05"                # fell back
+    assert store.weekly["asof_friday"] == "2026-06-05"
+    assert store.holdings[0]["weight_target"] == 1.0
+
+
+def test_latest_orders_asof_picks_newest_file(tmp_path):
+    from trading.publish.publish import _latest_orders_asof
+    od = tmp_path / "orders"
+    od.mkdir()
+    (od / "2026-05-29.json").write_text("{}")
+    (od / "2026-06-05.json").write_text("{}")
+    assert _latest_orders_asof(od) == "2026-06-05"
+    assert _latest_orders_asof(tmp_path / "nope") is None
+
+
+# ---------------------------------------------------------------------------
 # main() — intraday flag behavior (no network: outside-hours path only)
 # ---------------------------------------------------------------------------
 

@@ -66,8 +66,19 @@ def _prior_weights(weights_dir, asof: str) -> dict[str, float]:
     return {str(k): float(v) for k, v in (payload.get("weights") or {}).items()}
 
 
+def _latest_orders_asof(orders_dir) -> str | None:
+    """asof of the most recent EXECUTED rebalance (latest orders audit file).
+
+    This identifies the weights behind the current book: after the Friday
+    18:00 freeze, the newest weights file is next week's plan, which has not
+    been traded yet. None when nothing has been executed.
+    """
+    files = sorted(Path(orders_dir).glob("*.json"))
+    return files[-1].stem if files else None
+
+
 def publish_live(broker, store, *, weights_dir, orders_dir, asof, today, spy_last,
-                 fetch_metadata=None, flows_path=None):
+                 fetch_metadata=None, flows_path=None, active_asof=None):
     """Compute and write one snapshot from live broker account data.
 
     NAV is the broker's NetLiquidation and the per-holding rows (incl. day /
@@ -108,19 +119,37 @@ def publish_live(broker, store, *, weights_dir, orders_dir, asof, today, spy_las
         broker.disconnect()
     positions = {p["ticker"]: float(p["position"]) for p in portfolio}
 
-    # 2. Frozen weights for this Friday.
-    weights_payload = _load_json(Path(weights_dir) / f"{asof}.json")
-    target_weights = {str(k): float(v) for k, v in (weights_payload.get("weights") or {}).items()}
-    k_probs = weights_payload.get("k_probs") or {}
-    regime_features = weights_payload.get("regime_features")  # None until weights pipeline adds it
+    # 2. Weights. Two distinct weeks can be in play: the file behind the
+    # CURRENT book (``active_asof`` — the last executed rebalance) supplies the
+    # per-holding targets, while the newest frozen Friday file (``asof``)
+    # supplies the published weekly plan, regime call and turnover preview.
+    # Between the Friday 18:00 freeze and the Monday rebalance these differ;
+    # before the freeze the Friday file doesn't exist yet, so everything falls
+    # back to the active week instead of crashing.
+    if active_asof is None:
+        active_asof = asof
+    active_asof = str(pd.Timestamp(active_asof).date())
+    active_payload = _load_json(Path(weights_dir) / f"{active_asof}.json")
+    target_weights = {str(k): float(v) for k, v in (active_payload.get("weights") or {}).items()}
+
+    frozen_file = Path(weights_dir) / f"{asof}.json"
+    if frozen_file.exists():
+        frozen_payload = _load_json(frozen_file)
+    else:
+        logger.info("publish: weights for %s not frozen yet — using active week %s",
+                    asof, active_asof)
+        asof, frozen_payload = active_asof, active_payload
+    frozen_weights = {str(k): float(v) for k, v in (frozen_payload.get("weights") or {}).items()}
+    k_probs = frozen_payload.get("k_probs") or {}
+    regime_features = frozen_payload.get("regime_features")  # None until weights pipeline adds it
 
     last_weights = _prior_weights(weights_dir, asof)
-    turnover = compute_turnover(target_weights, last_weights) if last_weights else None
+    turnover = compute_turnover(frozen_weights, last_weights) if last_weights else None
 
     # Ticker metadata (company name + sector) for everything we hold or target.
     metadata: dict[str, dict] = {}
     if fetch_metadata is not None:
-        tickers = sorted(set(positions) | set(target_weights))
+        tickers = sorted(set(positions) | set(target_weights) | set(frozen_weights))
         try:
             metadata = fetch_metadata(tickers) or {}
         except Exception as exc:  # noqa: BLE001
@@ -195,7 +224,7 @@ def publish_live(broker, store, *, weights_dir, orders_dir, asof, today, spy_las
             {"asof_friday": asof, "ticker": t, "target_weight": w, "k_probs": k_probs,
              "company_name": metadata.get(t, {}).get("company_name"),
              "sector": metadata.get(t, {}).get("sector")}
-            for t, w in target_weights.items()
+            for t, w in frozen_weights.items()
         ],
     )
 
@@ -225,12 +254,23 @@ def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fet
     history = load_history(orders_dir)
     holdings_shares = current_holdings(history)
 
-    weights_payload = _load_json(Path(weights_dir) / f"{asof}.json")
-    target_weights = {str(k): float(v) for k, v in (weights_payload.get("weights") or {}).items()}
-    k_probs = weights_payload.get("k_probs") or {}
-    regime_features = weights_payload.get("regime_features")
+    # Same active-vs-frozen split as publish_live: holdings targets come from
+    # the last EXECUTED rebalance; the weekly plan from the newest frozen file.
+    active_asof = (
+        str(pd.Timestamp(history[-1]["asof"]).date()) if history else str(pd.Timestamp(asof).date())
+    )
+    active_payload = _load_json(Path(weights_dir) / f"{active_asof}.json")
+    target_weights = {str(k): float(v) for k, v in (active_payload.get("weights") or {}).items()}
+    frozen_file = Path(weights_dir) / f"{asof}.json"
+    if frozen_file.exists():
+        frozen_payload = _load_json(frozen_file)
+    else:
+        asof, frozen_payload = active_asof, active_payload
+    frozen_weights = {str(k): float(v) for k, v in (frozen_payload.get("weights") or {}).items()}
+    k_probs = frozen_payload.get("k_probs") or {}
+    regime_features = frozen_payload.get("regime_features")
     last_weights = _prior_weights(weights_dir, asof)
-    turnover = compute_turnover(target_weights, last_weights) if last_weights else None
+    turnover = compute_turnover(frozen_weights, last_weights) if last_weights else None
 
     # Every ticker ever held (for the historical curve) + currently held + SPY.
     ever: set[str] = set()
@@ -256,7 +296,9 @@ def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fet
     metadata: dict[str, dict] = {}
     if fetch_metadata is not None:
         try:
-            metadata = fetch_metadata(sorted(set(holdings_shares) | set(target_weights))) or {}
+            metadata = fetch_metadata(
+                sorted(set(holdings_shares) | set(target_weights) | set(frozen_weights))
+            ) or {}
         except Exception as exc:  # noqa: BLE001
             logger.warning("publish: ticker metadata unavailable (%s)", exc)
 
@@ -301,7 +343,7 @@ def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fet
             {"asof_friday": asof, "ticker": t, "target_weight": w, "k_probs": k_probs,
              "company_name": metadata.get(t, {}).get("company_name"),
              "sector": metadata.get(t, {}).get("sector")}
-            for t, w in target_weights.items()
+            for t, w in frozen_weights.items()
         ],
     )
     orders_path = Path(orders_dir) / f"{asof}.json"
@@ -430,6 +472,7 @@ def main(argv: list[str] | None = None) -> int:
             spy_last=fetch_spy_last(),
             fetch_metadata=fetch_ticker_metadata,
             flows_path=config.CAPITAL_FLOWS_PATH,
+            active_asof=_latest_orders_asof(config.ORDERS_DIR),
         )
     except (OSError, TimeoutError) as exc:
         if args.intraday:
