@@ -1,10 +1,14 @@
-"""Orchestrate one publish: audit files (+ optional broker) -> metrics -> Supabase.
+"""Orchestrate one publish: broker account data (or audit files) -> metrics -> Supabase.
 
-publish_from_audit reconstructs holdings/NAV/equity from the order audit + injected
-prices (no broker); main() wires the real yfinance fetchers + SupabaseStore for the
-daily systemd timer. publish_once is the older broker-based path, retained (with
-is_market_hours) for tests and a possible future broker truth-up; both are fully
-injectable so tests run against fakes with no network.
+publish_live is the production path: NAV is the broker's own NetLiquidation and
+per-holding P&L comes off the account-update channel (reqPnLSingle), so the
+dashboard matches the IBKR app to the penny. SPY stays on yfinance — it is a
+benchmark reference line, not a brokerage figure. main() runs it two ways:
+`--intraday` (15-min timer; skips silently outside market hours or when the
+Gateway is unreachable) and default EOD (16:30 timer; hard-fails into the
+OnFailure alert). publish_from_audit is the legacy reconstruction from the order
+audit + yfinance closes, kept for backfill/repair via `--from-audit`. All paths
+are fully injectable so tests run against fakes with no network.
 """
 from __future__ import annotations
 
@@ -18,8 +22,10 @@ from trading.publish.metrics import (
     compute_day_pnl,
     compute_execution_quality,
     compute_holdings,
+    compute_holdings_live,
     compute_risk,
     compute_turnover,
+    compute_week_to_date,
     pct_change,
 )
 from trading.publish.reconstruct import (
@@ -56,13 +62,17 @@ def _prior_weights(weights_dir, asof: str) -> dict[str, float]:
     return {str(k): float(v) for k, v in (payload.get("weights") or {}).items()}
 
 
-def publish_once(broker, store, *, weights_dir, orders_dir, asof, today, spy_close,
+def publish_live(broker, store, *, weights_dir, orders_dir, asof, today, spy_last,
                  fetch_metadata=None):
-    """Compute and write one snapshot. Returns a small summary dict.
+    """Compute and write one snapshot from live broker account data.
 
-    ``fetch_metadata`` is an optional callable ``tickers -> {ticker: {company_name,
-    sector}}`` (injected so tests stay network-free; main() passes the real
-    Sharadar fetcher). When None, holdings carry None name/sector.
+    NAV is the broker's NetLiquidation and the per-holding rows (incl. day /
+    unrealized P&L) come from ``broker.get_portfolio()`` — account-channel
+    data, so no market-data subscription and the numbers match the broker's
+    own app. ``spy_last`` is the latest SPY print (yfinance; benchmark only).
+    ``fetch_metadata`` is an optional callable ``tickers -> {ticker:
+    {company_name, sector}}`` (injected so tests stay network-free; main()
+    passes the real Sharadar fetcher). Returns a small summary dict.
     """
     asof = str(pd.Timestamp(asof).date())
     today = pd.Timestamp(today).normalize()
@@ -72,17 +82,11 @@ def publish_once(broker, store, *, weights_dir, orders_dir, asof, today, spy_clo
     # 1. Live account state (connect/disconnect bracket).
     broker.connect()
     try:
-        positions = broker.get_positions()
+        portfolio = broker.get_portfolio()
         nav = float(broker.get_nav())
-        prices: dict[str, float] = {}
-        for ticker in positions:
-            try:
-                bid, ask = broker.get_quote(ticker)
-                prices[ticker] = (bid + ask) / 2.0
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("publish: no quote for %s: %s", ticker, exc)
     finally:
         broker.disconnect()
+    positions = {p["ticker"]: float(p["position"]) for p in portfolio}
 
     # 2. Frozen weights for this Friday.
     weights_payload = _load_json(Path(weights_dir) / f"{asof}.json")
@@ -107,19 +111,20 @@ def publish_once(broker, store, *, weights_dir, orders_dir, asof, today, spy_clo
     prev_nav = _prev_nav(curve, today)
     inception_nav = float(curve[0]["nav"]) if curve else nav
     inception_spy = next(
-        (p["spy_close"] for p in curve if p.get("spy_close") is not None), spy_close
+        (p["spy_close"] for p in curve if p.get("spy_close") is not None), spy_last
     )
     today_str = str(today.date())
     navs = [float(p["nav"]) for p in curve if str(p["date"]) < today_str] + [nav]
 
     # 4. Metrics.
-    holdings = compute_holdings(positions, prices, target_weights, nav, metadata=metadata)
+    holdings = compute_holdings_live(portfolio, target_weights, nav, metadata=metadata)
     day_pnl, day_pnl_pct = compute_day_pnl(nav, prev_nav)
     risk = compute_risk(navs)
+    week_vs_spy = compute_week_to_date(curve, today.date(), nav, spy_last)
     invested = sum(h["market_value"] for h in holdings)
 
     # 5. Writes (equity point first so it is present for the next run).
-    store.upsert_equity_point(today_str, nav, spy_close)
+    store.upsert_equity_point(today_str, nav, spy_last)
     store.upsert_snapshot(
         {
             "asof": today_str,
@@ -127,7 +132,8 @@ def publish_once(broker, store, *, weights_dir, orders_dir, asof, today, spy_clo
             "day_pnl": day_pnl,
             "day_pnl_pct": day_pnl_pct,
             "total_return": pct_change(nav, inception_nav),
-            "spy_return": pct_change(spy_close, inception_spy),
+            "spy_return": pct_change(spy_last, inception_spy),
+            "week_vs_spy": week_vs_spy,
             "n_positions": len(holdings),
             "invested_pct": (invested / nav) if nav > 0 else None,
             "k_probs": k_probs,
@@ -212,6 +218,9 @@ def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fet
     inception_spy = next((p["spy_close"] for p in curve if p["spy_close"] is not None), None)
     spy_now = curve[-1]["spy_close"] if curve else None
     today_str = str(today.date())
+    # Week-to-date needs a baseline STRICTLY before this week's Monday, so feed
+    # it the curve minus its own last point (today's reconstruction).
+    week_vs_spy = compute_week_to_date(curve[:-1], today.date(), nav, spy_now)
 
     store.replace_equity_curve(curve)
     store.upsert_snapshot(
@@ -222,6 +231,7 @@ def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fet
             "day_pnl_pct": day_pnl_pct,
             "total_return": pct_change(nav, inception_nav),
             "spy_return": pct_change(spy_now, inception_spy),
+            "week_vs_spy": week_vs_spy,
             "n_positions": len(holdings),
             "invested_pct": (invested / nav) if nav > 0 else None,
             "k_probs": k_probs,
@@ -278,18 +288,52 @@ def fetch_spy_close() -> float | None:
         return None
 
 
-def main() -> int:
-    """CLI entrypoint for the daily timer: `python -m trading.publish`.
+def fetch_spy_last() -> float | None:
+    """Latest SPY print via yfinance: the last 1-minute bar (near-live during
+    market hours), falling back to the last daily close. Benchmark only — it
+    does not need brokerage precision."""
+    try:
+        import yfinance as yf  # noqa: PLC0415
 
-    Broker-free: holdings, NAV, and the equity curve are reconstructed from the
-    order audit + yfinance closes. No IBKR connection, no market-hours guard.
+        intraday = yf.Ticker("SPY").history(period="1d", interval="1m")
+        if not intraday.empty:
+            return float(intraday["Close"].iloc[-1])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("publish: intraday SPY fetch failed (%s) — falling back to close", exc)
+    return fetch_spy_close()
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entrypoint: `python -m trading.publish [--intraday | --from-audit]`.
+
+    default     EOD broker publish (16:30 timer). NAV/holdings from the live
+                Gateway account channel; failures propagate → OnFailure alert.
+    --intraday  15-min market-hours tick. Same broker path, but exits 0 quietly
+                outside market hours or when the Gateway is unreachable (a
+                skipped tick is not an incident; EOD will page if it persists).
+    --from-audit  Legacy reconstruction from the order audit + yfinance closes
+                (backfill/repair after an outage; rebuilds the whole curve).
     """
+    import argparse  # noqa: PLC0415
+
     import trading.config as config  # noqa: PLC0415
     from trading.data.snapshot import most_recent_friday  # noqa: PLC0415
-    from trading.data.sources import fetch_close_history, fetch_ticker_metadata  # noqa: PLC0415
+    from trading.data.sources import fetch_ticker_metadata  # noqa: PLC0415
     from trading.publish.store import SupabaseStore, make_client  # noqa: PLC0415
 
+    parser = argparse.ArgumentParser(prog="python -m trading.publish")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--intraday", action="store_true",
+                       help="15-min tick: skip outside market hours / Gateway down")
+    group.add_argument("--from-audit", action="store_true",
+                       help="rebuild from order audit + yfinance closes (backfill)")
+    args = parser.parse_args(argv)
+
     logging.basicConfig(level=logging.INFO)
+
+    if args.intraday and not is_market_hours():
+        logger.info("publish: outside market hours — intraday tick skipped")
+        return 0
 
     if not config.SUPABASE_URL or not config.SUPABASE_SERVICE_KEY:
         logger.error("publish: SUPABASE_URL / SUPABASE_SERVICE_KEY not set — aborting")
@@ -297,15 +341,45 @@ def main() -> int:
 
     store = SupabaseStore(make_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY))
     today = pd.Timestamp.now(tz="America/New_York").normalize().tz_localize(None)
-    summary = publish_from_audit(
-        store,
-        weights_dir=config.WEIGHTS_DIR,
-        orders_dir=config.ORDERS_DIR,
-        asof=most_recent_friday(),
-        today=today,
-        price_fetch=fetch_close_history,
-        fetch_metadata=fetch_ticker_metadata,
+
+    if args.from_audit:
+        from trading.data.sources import fetch_close_history  # noqa: PLC0415
+        summary = publish_from_audit(
+            store,
+            weights_dir=config.WEIGHTS_DIR,
+            orders_dir=config.ORDERS_DIR,
+            asof=most_recent_friday(),
+            today=today,
+            price_fetch=fetch_close_history,
+            fetch_metadata=fetch_ticker_metadata,
+        )
+        logger.info("publish: done (from-audit) — %s", summary)
+        return 0
+
+    # Broker path (intraday + EOD). Read-only connection on its own client id so
+    # a Monday 15:00 tick can coexist with the rebalance connection.
+    from trading.broker.ibkr import IBKRBroker  # noqa: PLC0415
+    broker = IBKRBroker(
+        host=config.IBKR_HOST,
+        port=config.IBKR_PORT,
+        client_id=config.IBKR_PUBLISH_CLIENT_ID,
+        readonly=True,
     )
+    try:
+        summary = publish_live(
+            broker, store,
+            weights_dir=config.WEIGHTS_DIR,
+            orders_dir=config.ORDERS_DIR,
+            asof=most_recent_friday(),
+            today=today,
+            spy_last=fetch_spy_last(),
+            fetch_metadata=fetch_ticker_metadata,
+        )
+    except (OSError, TimeoutError) as exc:
+        if args.intraday:
+            logger.warning("publish: Gateway unreachable (%s) — intraday tick skipped", exc)
+            return 0
+        raise
     logger.info("publish: done — %s", summary)
     return 0
 

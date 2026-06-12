@@ -1,0 +1,12 @@
+[Unit]
+Description=Every 15 min on weekdays - intraday dashboard tick
+
+[Timer]
+# Fires 09:00-16:45 ET every 15 min; the in-code market-hours guard (09:30-16:00)
+# turns the out-of-session firings into silent no-ops. Simpler and more robust
+# than encoding 09:30..16:00 in calendar syntax.
+OnCalendar=Mon..Fri *-*-* 09..16:00/15:00 America/New_York
+Persistent=false
+
+[Install]
+WantedBy=timers.target

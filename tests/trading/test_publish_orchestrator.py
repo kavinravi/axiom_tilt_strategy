@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from trading.broker.dryrun import DryRunBroker
-from trading.publish.publish import publish_once
+from trading.publish.publish import publish_live
 
 
 class _RecordingStore:
@@ -47,7 +47,7 @@ def _write_weights(weights_dir: Path, asof: str):
     (weights_dir / f"{asof}.json").write_text(json.dumps(payload))
 
 
-def test_publish_once_writes_all_products(tmp_path):
+def test_publish_live_writes_all_products(tmp_path):
     asof = "2026-05-29"
     today = pd.Timestamp("2026-06-01")
     _write_weights(tmp_path / "weights", asof)
@@ -60,11 +60,11 @@ def test_publish_once_writes_all_products(tmp_path):
     # Prior equity point so day P&L + inception return are computed.
     store = _RecordingStore(equity=[{"date": "2026-05-29", "nav": 9_000.0, "spy_close": 5000.0}])
 
-    summary = publish_once(
+    summary = publish_live(
         broker, store,
         weights_dir=tmp_path / "weights",
         orders_dir=tmp_path / "orders",   # no orders file → executions skipped
-        asof=asof, today=today, spy_close=5100.0,
+        asof=asof, today=today, spy_last=5100.0,
     )
 
     assert summary["asof"] == asof
@@ -79,7 +79,7 @@ def test_publish_once_writes_all_products(tmp_path):
     assert store.executions is None                      # no orders file
 
 
-def test_publish_once_includes_executions_when_orders_file_present(tmp_path):
+def test_publish_live_includes_executions_when_orders_file_present(tmp_path):
     asof = "2026-05-29"
     _write_weights(tmp_path / "weights", asof)
     orders_dir = tmp_path / "orders"
@@ -93,9 +93,9 @@ def test_publish_once_includes_executions_when_orders_file_present(tmp_path):
                           quotes={"AAA": (99.5, 100.5)})
     store = _RecordingStore()
 
-    publish_once(broker, store, weights_dir=tmp_path / "weights",
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
                  orders_dir=orders_dir, asof=asof,
-                 today=pd.Timestamp("2026-06-01"), spy_close=5100.0)
+                 today=pd.Timestamp("2026-06-01"), spy_last=5100.0)
 
     assert store.executions["asof"] == asof
     assert store.executions["rows"][0]["ticker"] == "AAA"
@@ -118,7 +118,7 @@ def test_is_market_hours_after_close_false():
     assert is_market_hours(pd.Timestamp("2026-06-01 16:30", tz="America/New_York")) is False
 
 
-def test_publish_once_same_day_rerun_excludes_stale_point(tmp_path):
+def test_publish_live_same_day_rerun_excludes_stale_point(tmp_path):
     # A prior run today already wrote an equity point for `today`. On re-run it must
     # NOT be treated as the "prior" NAV (idempotency — the systemd timer fires repeatedly).
     asof = "2026-05-29"
@@ -128,23 +128,23 @@ def test_publish_once_same_day_rerun_excludes_stale_point(tmp_path):
                           quotes={"AAA": (99.5, 100.5), "BBB": (99.5, 100.5)})
     store = _RecordingStore(equity=[{"date": "2026-06-01", "nav": 9_500.0, "spy_close": 5050.0}])
 
-    publish_once(broker, store, weights_dir=tmp_path / "weights",
-                 orders_dir=tmp_path / "orders", asof=asof, today=today, spy_close=5100.0)
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
+                 orders_dir=tmp_path / "orders", asof=asof, today=today, spy_last=5100.0)
 
     # No point STRICTLY before today → no prior NAV → day P&L is None (not 10000-9500).
     assert store.snapshot["day_pnl"] is None
     assert store.snapshot["day_pnl_pct"] is None
 
 
-def test_publish_once_inception_day_empty_curve(tmp_path):
+def test_publish_live_inception_day_empty_curve(tmp_path):
     asof = "2026-05-29"
     today = pd.Timestamp("2026-06-01")
     _write_weights(tmp_path / "weights", asof)
     broker = DryRunBroker(positions={"AAA": 60.0}, nav=10_000.0, quotes={"AAA": (99.5, 100.5)})
     store = _RecordingStore(equity=[])  # nothing yet — first ever publish
 
-    publish_once(broker, store, weights_dir=tmp_path / "weights",
-                 orders_dir=tmp_path / "orders", asof=asof, today=today, spy_close=5100.0)
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
+                 orders_dir=tmp_path / "orders", asof=asof, today=today, spy_last=5100.0)
 
     assert store.snapshot["day_pnl"] is None          # no prior point
     assert store.snapshot["total_return"] == 0.0      # nav == inception_nav
@@ -160,7 +160,7 @@ def test_is_market_hours_naive_input_is_localized_to_et():
 import math as _math
 
 
-def test_publish_once_computes_turnover_vs_prior_friday(tmp_path):
+def test_publish_live_computes_turnover_vs_prior_friday(tmp_path):
     wdir = tmp_path / "weights"
     wdir.mkdir(parents=True)
     # prior Friday and current Friday weights both present
@@ -172,8 +172,8 @@ def test_publish_once_computes_turnover_vs_prior_friday(tmp_path):
                           quotes={"AAA": (99.5, 100.5), "CCC": (99.5, 100.5)})
     store = _RecordingStore()
 
-    publish_once(broker, store, weights_dir=wdir, orders_dir=tmp_path / "orders",
-                 asof="2026-05-29", today=pd.Timestamp("2026-06-01"), spy_close=5100.0)
+    publish_live(broker, store, weights_dir=wdir, orders_dir=tmp_path / "orders",
+                 asof="2026-05-29", today=pd.Timestamp("2026-06-01"), spy_last=5100.0)
 
     t = store.snapshot["turnover"]
     assert t["added"] == ["CCC"]
@@ -182,13 +182,79 @@ def test_publish_once_computes_turnover_vs_prior_friday(tmp_path):
     assert _math.isclose(t["turnover_frac"], 0.6)
 
 
-def test_publish_once_turnover_none_without_prior_week(tmp_path):
+def test_publish_live_turnover_none_without_prior_week(tmp_path):
     asof = "2026-05-29"
     _write_weights(tmp_path / "weights", asof)  # only this week's file exists
     broker = DryRunBroker(positions={"AAA": 60.0, "BBB": 40.0}, nav=10_000.0,
                           quotes={"AAA": (99.5, 100.5), "BBB": (99.5, 100.5)})
     store = _RecordingStore()
-    publish_once(broker, store, weights_dir=tmp_path / "weights",
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
                  orders_dir=tmp_path / "orders", asof=asof,
-                 today=pd.Timestamp("2026-06-01"), spy_close=5100.0)
+                 today=pd.Timestamp("2026-06-01"), spy_last=5100.0)
     assert store.snapshot["turnover"] is None
+
+
+# ---------------------------------------------------------------------------
+# publish_live — new broker-account-channel behavior
+# ---------------------------------------------------------------------------
+
+def test_publish_live_week_vs_spy_in_snapshot(tmp_path):
+    asof = "2026-06-05"
+    today = pd.Timestamp("2026-06-10")  # Wednesday
+    _write_weights(tmp_path / "weights", asof)
+    broker = DryRunBroker(positions={"AAA": 60.0, "BBB": 40.0}, nav=10_300.0,
+                          quotes={"AAA": (99.5, 100.5), "BBB": (99.5, 100.5)})
+    # Prior Friday close is the baseline; Monday/Tuesday points exist too.
+    store = _RecordingStore(equity=[
+        {"date": "2026-06-05", "nav": 10_000.0, "spy_close": 5000.0},
+        {"date": "2026-06-08", "nav": 10_100.0, "spy_close": 5020.0},
+        {"date": "2026-06-09", "nav": 10_200.0, "spy_close": 5010.0},
+    ])
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
+                 orders_dir=tmp_path / "orders", asof=asof, today=today,
+                 spy_last=5100.0)
+    w = store.snapshot["week_vs_spy"]
+    assert w["baseline_date"] == "2026-06-05"
+    assert _math.isclose(w["portfolio_return"], 0.03)        # 10300/10000 - 1
+    assert _math.isclose(w["spy_return"], 5100.0 / 5000.0 - 1.0)
+    assert _math.isclose(w["excess_return"], w["portfolio_return"] - w["spy_return"])
+
+
+def test_publish_live_holdings_carry_pnl_fields(tmp_path):
+    asof = "2026-06-05"
+    _write_weights(tmp_path / "weights", asof)
+    broker = DryRunBroker(positions={"AAA": 60.0}, nav=10_000.0,
+                          quotes={"AAA": (99.5, 100.5)})
+    store = _RecordingStore()
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
+                 orders_dir=tmp_path / "orders", asof=asof,
+                 today=pd.Timestamp("2026-06-10"), spy_last=5100.0)
+    h = store.holdings[0]
+    # DryRunBroker marks at midpoint with flat P&L — keys must be present.
+    assert h["price"] == 100.0
+    assert h["avg_cost"] == 100.0
+    assert h["unrealized_pnl"] == 0.0
+    assert h["daily_pnl"] == 0.0
+
+
+def test_publish_live_first_week_week_vs_spy_none(tmp_path):
+    asof = "2026-06-05"
+    _write_weights(tmp_path / "weights", asof)
+    broker = DryRunBroker(positions={"AAA": 60.0}, nav=10_000.0,
+                          quotes={"AAA": (99.5, 100.5)})
+    store = _RecordingStore(equity=[])   # no baseline before this week's Monday
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
+                 orders_dir=tmp_path / "orders", asof=asof,
+                 today=pd.Timestamp("2026-06-10"), spy_last=5100.0)
+    assert store.snapshot["week_vs_spy"] is None
+
+
+# ---------------------------------------------------------------------------
+# main() — intraday flag behavior (no network: outside-hours path only)
+# ---------------------------------------------------------------------------
+
+def test_main_intraday_skips_outside_market_hours(monkeypatch):
+    import trading.publish.publish as pub
+    # Freeze "now" to a Saturday so is_market_hours() is False.
+    monkeypatch.setattr(pub, "is_market_hours", lambda: False)
+    assert pub.main(["--intraday"]) == 0

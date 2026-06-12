@@ -116,6 +116,53 @@ class IBKRBroker(Broker):
                 return nav
         raise RuntimeError("IBKRBroker: NetLiquidation tag not found in accountSummary()")
 
+    def get_portfolio(self) -> list[dict]:
+        """Per-position snapshot via the account-update channel (no market data
+        subscription): ib.portfolio() supplies position/market_price/market_value/
+        avg_cost/unrealized_pnl; reqPnLSingle supplies the day P&L — the same
+        figures the IBKR mobile portfolio tab shows.
+        """
+        items = [p for p in self.ib.portfolio() if p.contract.secType == "STK"]
+        accounts = self.ib.managedAccounts()
+        account = accounts[0] if accounts else ""
+
+        # Batch-request day P&L for every position, give the account channel a
+        # moment to populate, then read + cancel. PnL subscriptions are account
+        # data — free, no quote entitlement involved.
+        pnl_reqs: dict[int, object] = {}
+        for it in items:
+            try:
+                pnl_reqs[it.contract.conId] = self.ib.reqPnLSingle(account, "", it.contract.conId)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("IBKRBroker: reqPnLSingle(%s) failed: %s", it.contract.symbol, exc)
+        if pnl_reqs:
+            self.ib.sleep(2.0)
+
+        def _clean(v) -> float | None:
+            return None if v is None or (isinstance(v, float) and math.isnan(v)) else float(v)
+
+        rows: list[dict] = []
+        for it in items:
+            ps = pnl_reqs.get(it.contract.conId)
+            rows.append(
+                {
+                    "ticker": it.contract.symbol,
+                    "position": float(it.position),
+                    "market_price": _clean(it.marketPrice),
+                    "market_value": _clean(it.marketValue),
+                    "avg_cost": _clean(it.averageCost),
+                    "unrealized_pnl": _clean(it.unrealizedPNL),
+                    "daily_pnl": _clean(getattr(ps, "dailyPnL", None)),
+                }
+            )
+        for con_id in pnl_reqs:
+            try:
+                self.ib.cancelPnLSingle(account, "", con_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("IBKRBroker: cancelPnLSingle(%s) raised (harmless): %s", con_id, exc)
+        logger.info("IBKRBroker: get_portfolio() → %d positions", len(rows))
+        return rows
+
     def get_quote(self, ticker: str) -> tuple[float, float]:
         """Return (bid, ask) for *ticker*.
 

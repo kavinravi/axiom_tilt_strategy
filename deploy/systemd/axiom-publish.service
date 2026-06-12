@@ -1,9 +1,10 @@
 [Unit]
-Description=Axiom Tilt - publish dashboard snapshot (audit trail + yfinance, no broker)
+Description=Axiom Tilt - EOD dashboard publish (broker NetLiquidation truth)
 OnFailure=axiom-alert@%n.service
 
 [Service]
 Type=oneshot
 WorkingDirectory=%h/axiom_tilt_strategy
-# Broker-free: reconstructs holdings/NAV/equity from trading/audit + yfinance.
+# Broker account channel: NAV = NetLiquidation, holdings P&L via reqPnLSingle.
+# Stamps the official daily equity point at 16:30. Hard failure -> alert.
 ExecStart=%h/axiom_tilt_strategy/.venv/bin/python -m trading.publish

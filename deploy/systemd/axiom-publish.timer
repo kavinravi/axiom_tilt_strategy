@@ -1,9 +1,9 @@
 [Unit]
-Description=Daily after US close - publish dashboard snapshot from the audit trail
+Description=Daily after US close - EOD dashboard publish (broker truth)
 
 [Timer]
-# 16:30 America/New_York, every day. The publisher is broker-free (reads the order
-# audit + yfinance), so it does not need the IBKR Gateway and has no market-hours guard.
+# 16:30 America/New_York, every day. Reads the Gateway's account channel
+# (NetLiquidation marked at the close) and stamps the canonical daily point.
 OnCalendar=*-*-* 16:30 America/New_York
 Persistent=true
 

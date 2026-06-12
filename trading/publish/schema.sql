@@ -18,6 +18,9 @@ create table if not exists snapshot (
   turnover        jsonb
 );
 alter table snapshot add column if not exists turnover jsonb;
+-- Trading-week-to-date comparison vs SPY: {baseline_date, portfolio_return,
+-- spy_return, excess_return}. Written by the broker-based publisher.
+alter table snapshot add column if not exists week_vs_spy jsonb;
 
 create table if not exists equity_curve (
   date       date primary key,
@@ -38,6 +41,10 @@ create table if not exists holdings (
 );
 alter table holdings add column if not exists company_name text;
 alter table holdings add column if not exists sector text;
+-- IB-mobile-style per-holding P&L, from the broker account channel.
+alter table holdings add column if not exists avg_cost double precision;
+alter table holdings add column if not exists unrealized_pnl double precision;
+alter table holdings add column if not exists daily_pnl double precision;
 
 create table if not exists weekly_portfolio (
   asof_friday   date not null,

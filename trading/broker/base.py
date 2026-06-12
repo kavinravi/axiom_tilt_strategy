@@ -52,6 +52,17 @@ class Broker(ABC):
     @abstractmethod
     def get_quote(self, ticker: str) -> tuple[float, float]: ...   # (bid, ask)
 
+    def get_portfolio(self) -> list[dict]:
+        """Per-position snapshot from the broker's account channel.
+
+        Rows: {ticker, position, market_price, market_value, avg_cost,
+        unrealized_pnl, daily_pnl} — P&L fields None when unavailable. Account
+        data, NOT market data: needs no quote subscription, and the figures
+        match what the broker's own app displays. Non-abstract (default raises)
+        so existing Broker fakes keep working until they need it.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not implement get_portfolio()")
+
     # ------------------------------------------------------------------
     # Non-blocking order submission
     # ------------------------------------------------------------------

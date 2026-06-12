@@ -57,12 +57,17 @@ loginctl enable-linger "$USER"                # let user timers run while logged
 mkdir -p ~/.config/systemd/user
 cp deploy/systemd/* ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now axiom-weights.timer axiom-rebalance.timer axiom-publish.timer
+systemctl --user enable --now axiom-weights.timer axiom-rebalance.timer \
+    axiom-publish.timer axiom-publish-intraday.timer
 systemctl --user list-timers
 ```
-Times are ET, DST-safe: **weights Fri 18:00**, **rebalance Mon 15:00**, **publish
-every 20 min during market hours**. The rebalance unit ships as `--mode paper` —
-flip it to live only in step 5.
+Times are ET, DST-safe: **weights Fri 18:00**, **rebalance Mon 15:00**,
+**intraday publish every 15 min 09:30–16:00** (broker NAV + per-holding P&L;
+skips quietly when the market is closed or the Gateway is down), **EOD publish
+16:30 daily** (stamps the canonical close point; failure alerts). The rebalance
+unit ships as `--mode paper` — flip it to live only in step 5.
+`python -m trading.publish --from-audit` remains available to rebuild the curve
+from the order audit after an outage.
 
 ## 5. Go-live order
 1. Container on **paper**, `weights` works, one full **paper rebalance** is clean.

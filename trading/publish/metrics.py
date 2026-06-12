@@ -5,6 +5,7 @@ returns plain dicts/lists, so they are trivially unit-testable.
 """
 from __future__ import annotations
 
+import datetime as dt
 import math
 
 
@@ -44,6 +45,80 @@ def compute_holdings(
         )
     rows.sort(key=lambda r: r["weight_actual"], reverse=True)
     return rows
+
+
+def compute_holdings_live(
+    portfolio: list[dict],
+    target_weights: dict[str, float],
+    nav: float,
+    metadata: dict[str, dict] | None = None,
+) -> list[dict]:
+    """Per-holding table from broker portfolio rows (IB-mobile style).
+
+    ``portfolio`` rows come from ``Broker.get_portfolio()``: ticker, position,
+    market_price, market_value, avg_cost, unrealized_pnl, daily_pnl. Skips
+    zero-share rows; sorts by actual weight. P&L fields pass through as-is
+    (None when the broker had no figure) so the row schema stays uniform.
+    """
+    metadata = metadata or {}
+    rows: list[dict] = []
+    for p in portfolio:
+        shares = float(p.get("position") or 0.0)
+        if shares == 0.0:
+            continue
+        ticker = str(p["ticker"])
+        market_value = float(p.get("market_value") or 0.0)
+        meta = metadata.get(ticker, {})
+        rows.append(
+            {
+                "ticker": ticker,
+                "company_name": meta.get("company_name"),
+                "sector": meta.get("sector"),
+                "shares": shares,
+                "price": float(p.get("market_price") or 0.0),
+                "market_value": market_value,
+                "weight_actual": (market_value / nav) if nav > 0 else 0.0,
+                "weight_target": float(target_weights.get(ticker, 0.0)),
+                "avg_cost": p.get("avg_cost"),
+                "unrealized_pnl": p.get("unrealized_pnl"),
+                "daily_pnl": p.get("daily_pnl"),
+            }
+        )
+    rows.sort(key=lambda r: r["weight_actual"], reverse=True)
+    return rows
+
+
+def compute_week_to_date(
+    curve: list[dict],
+    today: dt.date,
+    nav_now: float,
+    spy_now: float | None,
+) -> dict | None:
+    """Trading-week-to-date: portfolio vs SPY since the prior week's last close.
+
+    The baseline is the most recent equity point STRICTLY before this week's
+    Monday, so Monday's move is always included: on Wednesday the comparison
+    covers Mon-Wed; on Friday the full Mon-Fri week. Returns None until a
+    baseline exists (first week of history). spy fields are None when either
+    end of the SPY pair is missing.
+    """
+    monday = today - dt.timedelta(days=today.weekday())
+    cutoff = monday.isoformat()
+    baseline = None
+    for p in curve:  # curve is chronological; keep the last qualifying point
+        if str(p["date"]) < cutoff and p.get("nav") and float(p["nav"]) > 0:
+            baseline = p
+    if baseline is None:
+        return None
+    port = pct_change(nav_now, float(baseline["nav"]))
+    base_spy = baseline.get("spy_close")
+    spy = pct_change(spy_now, float(base_spy)) if (spy_now and base_spy) else None
+    return {
+        "baseline_date": str(baseline["date"]),
+        "portfolio_return": port,
+        "spy_return": spy,
+        "excess_return": (port - spy) if (port is not None and spy is not None) else None,
+    }
 
 
 def pct_change(now: float | None, base: float | None) -> float | None:

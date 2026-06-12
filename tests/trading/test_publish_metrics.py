@@ -165,3 +165,95 @@ def test_compute_execution_quality_sorted_by_ticker():
 
 def test_pct_change_none_now_is_none():
     assert pct_change(None, 100.0) is None
+
+# ---------------------------------------------------------------------------
+# compute_week_to_date — trailing-trading-week portfolio vs SPY
+# ---------------------------------------------------------------------------
+
+from trading.publish.metrics import compute_week_to_date
+import datetime as dt
+
+
+_CURVE = [
+    {"date": "2026-06-04", "nav": 98_000.0, "spy_close": 5000.0},  # Thu
+    {"date": "2026-06-05", "nav": 100_000.0, "spy_close": 5050.0},  # Fri (baseline)
+    {"date": "2026-06-08", "nav": 101_000.0, "spy_close": 5060.0},  # Mon
+    {"date": "2026-06-09", "nav": 102_000.0, "spy_close": 5040.0},  # Tue
+]
+
+
+def test_week_to_date_baselines_on_prior_friday():
+    # Wednesday 2026-06-10: the week covers Mon-Wed, so the baseline is the
+    # prior Friday's close — Monday's move must be included.
+    out = compute_week_to_date(_CURVE, dt.date(2026, 6, 10), nav_now=103_000.0, spy_now=5101.0)
+    assert out["baseline_date"] == "2026-06-05"
+    assert math.isclose(out["portfolio_return"], 0.03)
+    assert math.isclose(out["spy_return"], 5101.0 / 5050.0 - 1.0)
+    assert math.isclose(out["excess_return"],
+                        out["portfolio_return"] - out["spy_return"])
+
+
+def test_week_to_date_on_monday_uses_prior_friday():
+    out = compute_week_to_date(_CURVE, dt.date(2026, 6, 8), nav_now=101_000.0, spy_now=5060.0)
+    assert out["baseline_date"] == "2026-06-05"
+    assert math.isclose(out["portfolio_return"], 0.01)
+
+
+def test_week_to_date_no_baseline_returns_none():
+    # Curve starts this week → nothing strictly before Monday.
+    curve = [{"date": "2026-06-08", "nav": 100_000.0, "spy_close": 5000.0}]
+    assert compute_week_to_date(curve, dt.date(2026, 6, 10), 101_000.0, 5050.0) is None
+
+
+def test_week_to_date_missing_spy_returns_none_spy_fields():
+    curve = [{"date": "2026-06-05", "nav": 100_000.0, "spy_close": None}]
+    out = compute_week_to_date(curve, dt.date(2026, 6, 10), 102_000.0, 5050.0)
+    assert math.isclose(out["portfolio_return"], 0.02)
+    assert out["spy_return"] is None
+    assert out["excess_return"] is None
+
+
+def test_week_to_date_empty_curve_returns_none():
+    assert compute_week_to_date([], dt.date(2026, 6, 10), 100_000.0, 5000.0) is None
+
+
+# ---------------------------------------------------------------------------
+# compute_holdings_live — broker portfolio rows (IB-mobile style P&L)
+# ---------------------------------------------------------------------------
+
+from trading.publish.metrics import compute_holdings_live
+
+
+def test_holdings_live_maps_portfolio_rows():
+    portfolio = [
+        {"ticker": "AAA", "position": 100.0, "market_price": 10.0, "market_value": 1000.0,
+         "avg_cost": 9.0, "unrealized_pnl": 100.0, "daily_pnl": 12.5},
+        {"ticker": "BBB", "position": 50.0, "market_price": 40.0, "market_value": 2000.0,
+         "avg_cost": 41.0, "unrealized_pnl": -50.0, "daily_pnl": None},
+    ]
+    rows = compute_holdings_live(portfolio, {"AAA": 0.30, "BBB": 0.70}, nav=3000.0)
+    # sorted by actual weight desc: BBB first
+    assert [r["ticker"] for r in rows] == ["BBB", "AAA"]
+    assert math.isclose(rows[0]["weight_actual"], 2000.0 / 3000.0)
+    assert math.isclose(rows[0]["weight_target"], 0.70)
+    assert rows[0]["daily_pnl"] is None          # absent from broker → None, key present
+    assert math.isclose(rows[1]["shares"], 100.0)
+    assert math.isclose(rows[1]["avg_cost"], 9.0)
+    assert math.isclose(rows[1]["unrealized_pnl"], 100.0)
+    assert math.isclose(rows[1]["daily_pnl"], 12.5)
+
+
+def test_holdings_live_skips_zero_positions_and_attaches_metadata():
+    portfolio = [
+        {"ticker": "AAA", "position": 0.0, "market_price": 10.0, "market_value": 0.0,
+         "avg_cost": None, "unrealized_pnl": None, "daily_pnl": None},
+        {"ticker": "NVDA", "position": 10.0, "market_price": 100.0, "market_value": 1000.0,
+         "avg_cost": 90.0, "unrealized_pnl": 100.0, "daily_pnl": 5.0},
+    ]
+    meta = {"NVDA": {"company_name": "NVIDIA CORP", "sector": "Technology"}}
+    rows = compute_holdings_live(portfolio, {}, nav=1000.0, metadata=meta)
+    assert len(rows) == 1
+    assert rows[0]["ticker"] == "NVDA"
+    assert rows[0]["company_name"] == "NVIDIA CORP"
+    assert rows[0]["sector"] == "Technology"
+    assert rows[0]["weight_target"] == 0.0

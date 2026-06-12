@@ -79,6 +79,26 @@ class DryRunBroker(Broker):
         logger.warning("DryRunBroker: no quote for %s, synthesizing (%s, %s)", ticker, bid, ask)
         return (bid, ask)
 
+    def get_portfolio(self) -> list[dict]:
+        """Synthetic portfolio rows: marks every position at the quote midpoint,
+        with flat (0.0) P&L — enough shape for publisher tests."""
+        rows: list[dict] = []
+        for ticker, shares in self._positions.items():
+            bid, ask = self.get_quote(ticker)
+            price = (bid + ask) / 2.0
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "position": shares,
+                    "market_price": price,
+                    "market_value": shares * price,
+                    "avg_cost": price,
+                    "unrealized_pnl": 0.0,
+                    "daily_pnl": 0.0,
+                }
+            )
+        return rows
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
