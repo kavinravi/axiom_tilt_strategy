@@ -25,8 +25,8 @@ test("Now tab shows the week-vs-SPY scoreboard", async ({ page }) => {
   await login(page);
   await expect(page.getByText("This Week vs SPY")).toBeVisible();
   await expect(page.getByText("since 2026-06-05 close")).toBeVisible();
-  await expect(page.getByText("+0.59%")).toBeVisible();  // strategy WTD
-  await expect(page.getByText("+0.28%")).toBeVisible();  // excess
+  await expect(page.getByText("+1.23%")).toBeVisible();  // strategy WTD
+  await expect(page.getByText("+0.77%")).toBeVisible();  // excess
 });
 
 test("Now tab shows the go-live empty state when there is no snapshot", async ({ page }) => {

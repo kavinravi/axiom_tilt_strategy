@@ -18,9 +18,9 @@ export const populated: Dataset = {
     turnover: { added: ["AVGO"], dropped: ["AMD"], turnover_frac: 0.18 },
     week_vs_spy: {
       baseline_date: "2026-06-05",
-      portfolio_return: 0.0059,
-      spy_return: 0.0031,
-      excess_return: 0.0028,
+      portfolio_return: 0.0123,
+      spy_return: 0.0046,
+      excess_return: 0.0077,
     },
   },
   equityCurve: [
