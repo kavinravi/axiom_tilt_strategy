@@ -1,12 +1,16 @@
 "use client";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { twrReturns } from "@/lib/twr";
 import type { EquityPoint } from "@/lib/types";
 
 export function EquityChart({ points }: { points: EquityPoint[] }) {
   const base = points[0];
-  const data = points.map((p) => ({
+  // Time-weighted: growth of invested capital, not of account balance —
+  // deposits/withdrawals (flow column) contribute zero.
+  const strategy = twrReturns(points);
+  const data = points.map((p, i) => ({
     date: p.date,
-    Strategy: base && base.nav ? p.nav / base.nav - 1 : 0,
+    Strategy: strategy[i],
     SPY: base?.spy_close && p.spy_close ? p.spy_close / base.spy_close - 1 : null,
   }));
   return (

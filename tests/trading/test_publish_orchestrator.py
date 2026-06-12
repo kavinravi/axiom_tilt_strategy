@@ -24,8 +24,8 @@ class _RecordingStore:
     def read_equity_curve(self):
         return list(self._equity)
 
-    def upsert_equity_point(self, date, nav, spy_close):
-        self.equity_point = {"date": date, "nav": nav, "spy_close": spy_close}
+    def upsert_equity_point(self, date, nav, spy_close, flow=0.0):
+        self.equity_point = {"date": date, "nav": nav, "spy_close": spy_close, "flow": flow}
 
     def upsert_snapshot(self, row):
         self.snapshot = row
@@ -68,9 +68,14 @@ def test_publish_live_writes_all_products(tmp_path):
     )
 
     assert summary["asof"] == asof
-    assert store.equity_point == {"date": "2026-06-01", "nav": 10_000.0, "spy_close": 5100.0}
+    # DryRunBroker reports 0.0 account day P&L, so the 9000→10000 ΔNAV is an
+    # unexplained +1000 ≥ threshold → detected as an external flow, and every
+    # growth metric excludes it.
+    assert store.equity_point == {"date": "2026-06-01", "nav": 10_000.0,
+                                  "spy_close": 5100.0, "flow": 1000.0}
     assert store.snapshot["nav"] == 10_000.0
-    assert store.snapshot["day_pnl"] == 1000.0          # 10000 - 9000
+    assert store.snapshot["day_pnl"] == 0.0             # broker truth, not ΔNAV
+    assert store.snapshot["total_return"] == 0.0        # deposit ≠ growth
     assert store.snapshot["k_probs"] == {"10": 0.6, "20": 0.4}
     assert {h["ticker"] for h in store.holdings} == {"AAA", "BBB"}
     assert all(h["asof"] == "2026-06-01" for h in store.holdings)
@@ -131,8 +136,9 @@ def test_publish_live_same_day_rerun_excludes_stale_point(tmp_path):
     publish_live(broker, store, weights_dir=tmp_path / "weights",
                  orders_dir=tmp_path / "orders", asof=asof, today=today, spy_last=5100.0)
 
-    # No point STRICTLY before today → no prior NAV → day P&L is None (not 10000-9500).
-    assert store.snapshot["day_pnl"] is None
+    # No point STRICTLY before today → no prior NAV → day P&L % has no base
+    # (day P&L itself is the broker's figure, prior point or not).
+    assert store.snapshot["day_pnl"] == 0.0
     assert store.snapshot["day_pnl_pct"] is None
 
 
@@ -146,8 +152,9 @@ def test_publish_live_inception_day_empty_curve(tmp_path):
     publish_live(broker, store, weights_dir=tmp_path / "weights",
                  orders_dir=tmp_path / "orders", asof=asof, today=today, spy_last=5100.0)
 
-    assert store.snapshot["day_pnl"] is None          # no prior point
-    assert store.snapshot["total_return"] == 0.0      # nav == inception_nav
+    assert store.snapshot["day_pnl"] == 0.0           # broker's figure (DryRun: flat 0)
+    assert store.snapshot["day_pnl_pct"] is None      # no prior point → no base
+    assert store.snapshot["total_return"] == 0.0      # index starts at 1.0 today
     assert store.snapshot["spy_return"] == 0.0        # spy_close == inception_spy
     assert store.snapshot["risk"]["sharpe"] is None   # single-point series → no risk stats
 
@@ -247,6 +254,113 @@ def test_publish_live_first_week_week_vs_spy_none(tmp_path):
                  orders_dir=tmp_path / "orders", asof=asof,
                  today=pd.Timestamp("2026-06-10"), spy_last=5100.0)
     assert store.snapshot["week_vs_spy"] is None
+
+
+# ---------------------------------------------------------------------------
+# publish_live — external-flow detection + capital-flows ledger
+# ---------------------------------------------------------------------------
+
+def _deposit_setup(tmp_path):
+    """Prior close 100k; today's NAV 176k with 0.0 broker day P&L → 76k deposit."""
+    asof = "2026-06-05"
+    _write_weights(tmp_path / "weights", asof)
+    broker = DryRunBroker(positions={"AAA": 1000.0}, nav=176_000.0,
+                          quotes={"AAA": (99.5, 100.5)})
+    store = _RecordingStore(equity=[
+        {"date": "2026-06-05", "nav": 99_000.0, "spy_close": 5000.0},
+        {"date": "2026-06-11", "nav": 100_000.0, "spy_close": 5050.0},
+    ])
+    return asof, broker, store
+
+
+def test_publish_live_detected_flow_recorded_and_stripped(tmp_path):
+    asof, broker, store = _deposit_setup(tmp_path)
+    flows_path = tmp_path / "capital_flows.json"
+
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
+                 orders_dir=tmp_path / "orders", asof=asof,
+                 today=pd.Timestamp("2026-06-12"), spy_last=5100.0,
+                 flows_path=flows_path)
+
+    assert store.equity_point["flow"] == 76_000.0
+    assert json.loads(flows_path.read_text()) == {"2026-06-12": 76_000.0}
+    # Growth excludes the deposit: 100/99 - 1, not 176/99 - 1.
+    assert _math.isclose(store.snapshot["total_return"], 100_000.0 / 99_000.0 - 1.0)
+    w = store.snapshot["week_vs_spy"]
+    # Week = 06-08..06-12: the 99k→100k gain is in-week; the deposit is not.
+    assert _math.isclose(w["portfolio_return"], 100_000.0 / 99_000.0 - 1.0)
+    assert store.snapshot["day_pnl"] == 0.0
+
+
+def test_publish_live_manual_ledger_entry_beats_detection(tmp_path):
+    asof, broker, store = _deposit_setup(tmp_path)
+    flows_path = tmp_path / "capital_flows.json"
+    flows_path.write_text(json.dumps({"2026-06-12": 75_242.19}))
+
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
+                 orders_dir=tmp_path / "orders", asof=asof,
+                 today=pd.Timestamp("2026-06-12"), spy_last=5100.0,
+                 flows_path=flows_path)
+
+    assert store.equity_point["flow"] == 75_242.19
+    assert json.loads(flows_path.read_text()) == {"2026-06-12": 75_242.19}  # untouched
+
+
+def test_publish_live_ledger_overrides_stored_flow_column(tmp_path):
+    # A hand-corrected PAST date in the ledger wins over the curve's flow column.
+    asof = "2026-06-05"
+    _write_weights(tmp_path / "weights", asof)
+    broker = DryRunBroker(positions={"AAA": 1000.0}, nav=176_500.0,
+                          quotes={"AAA": (99.5, 100.5)})
+    store = _RecordingStore(equity=[
+        {"date": "2026-06-05", "nav": 100_000.0, "spy_close": 5000.0},
+        {"date": "2026-06-11", "nav": 176_000.0, "spy_close": 5050.0, "flow": 70_000.0},
+    ])
+    flows_path = tmp_path / "capital_flows.json"
+    flows_path.write_text(json.dumps({"2026-06-11": 75_000.0}))
+
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
+                 orders_dir=tmp_path / "orders", asof=asof,
+                 today=pd.Timestamp("2026-06-12"), spy_last=5100.0,
+                 flows_path=flows_path)
+
+    # 06-11: (176000-75000)/100000 = 1.01; 06-12: 176500/176000 → small gain on top.
+    expected = 1.01 * (176_500.0 / 176_000.0) - 1.0
+    assert _math.isclose(store.snapshot["total_return"], expected)
+
+
+def test_publish_live_no_ledger_path_still_detects(tmp_path):
+    asof, broker, store = _deposit_setup(tmp_path)
+
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
+                 orders_dir=tmp_path / "orders", asof=asof,
+                 today=pd.Timestamp("2026-06-12"), spy_last=5100.0)
+
+    assert store.equity_point["flow"] == 76_000.0
+    assert _math.isclose(store.snapshot["total_return"], 100_000.0 / 99_000.0 - 1.0)
+
+
+def test_publish_live_account_pnl_failure_falls_back_to_holdings_sum(tmp_path):
+    asof = "2026-06-05"
+    _write_weights(tmp_path / "weights", asof)
+
+    class _NoAccountPnl(DryRunBroker):
+        def get_account_pnl(self):
+            raise RuntimeError("reqPnL unavailable")
+
+    broker = _NoAccountPnl(positions={"AAA": 100.0}, nav=10_050.0,
+                           quotes={"AAA": (99.5, 100.5)})
+    store = _RecordingStore(equity=[{"date": "2026-06-11", "nav": 10_000.0,
+                                     "spy_close": 5000.0}])
+
+    publish_live(broker, store, weights_dir=tmp_path / "weights",
+                 orders_dir=tmp_path / "orders", asof=asof,
+                 today=pd.Timestamp("2026-06-12"), spy_last=5100.0)
+
+    # Per-holding sum (DryRun: 0.0 each) is the fallback day P&L.
+    assert store.snapshot["day_pnl"] == 0.0
+    # ΔNAV +50 unexplained but below threshold → yield, not flow.
+    assert store.equity_point["flow"] == 0.0
 
 
 # ---------------------------------------------------------------------------

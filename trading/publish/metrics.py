@@ -88,29 +88,92 @@ def compute_holdings_live(
     return rows
 
 
+def twr_index(curve: list[dict]) -> list[float]:
+    """Chain-linked time-weighted-return index over {nav, flow} rows, 1.0 at start.
+
+    Day return = (nav_t - flow_t) / nav_{t-1} - 1, i.e. external cash that landed
+    on day t (``flow``: deposit positive, withdrawal negative) is stripped out
+    before measuring growth — deposits compound at exactly zero. A missing/None
+    flow means 0. A non-positive prior NAV makes that day's return unmeasurable;
+    the index carries flat across it.
+    """
+    index: list[float] = []
+    for i, p in enumerate(curve):
+        if i == 0:
+            index.append(1.0)
+            continue
+        prev_nav = float(curve[i - 1].get("nav") or 0.0)
+        if prev_nav <= 0:
+            index.append(index[-1])
+            continue
+        flow = float(p.get("flow") or 0.0)
+        index.append(index[-1] * (float(p["nav"]) - flow) / prev_nav)
+    return index
+
+
+def detect_flow(
+    nav: float,
+    prev_nav: float | None,
+    day_pnl: float | None,
+    *,
+    min_abs: float = 1000.0,
+    min_frac: float = 0.005,
+) -> float:
+    """Implied external cash flow today: the ΔNAV the broker's day P&L can't explain.
+
+    flow = (nav - prev_nav) - day_pnl. Residuals below max(min_abs, min_frac *
+    prev_nav) are interest / dividends / fees — genuine yield, not deposits — and
+    return 0.0. Also 0.0 when prev_nav or day_pnl is unavailable (nothing to
+    attribute against; ΔNAV is then treated as return, the pre-flow behavior).
+    """
+    if prev_nav is None or prev_nav <= 0 or day_pnl is None:
+        return 0.0
+    implied = (nav - prev_nav) - day_pnl
+    if abs(implied) < max(min_abs, min_frac * prev_nav):
+        return 0.0
+    return implied
+
+
+def holdings_day_pnl(portfolio: list[dict]) -> float | None:
+    """Sum of per-holding day P&L; None when no row carries a figure.
+
+    Fallback for when the account-level reqPnL is unavailable — it misses the
+    realized P&L of positions fully closed today (they have no portfolio row).
+    """
+    vals = [float(p["daily_pnl"]) for p in portfolio if p.get("daily_pnl") is not None]
+    return sum(vals) if vals else None
+
+
 def compute_week_to_date(
     curve: list[dict],
     today: dt.date,
     nav_now: float,
     spy_now: float | None,
+    flow_today: float = 0.0,
 ) -> dict | None:
     """Trading-week-to-date: portfolio vs SPY since the prior week's last close.
 
     The baseline is the most recent equity point STRICTLY before this week's
     Monday, so Monday's move is always included: on Wednesday the comparison
-    covers Mon-Wed; on Friday the full Mon-Fri week. Returns None until a
-    baseline exists (first week of history). spy fields are None when either
-    end of the SPY pair is missing.
+    covers Mon-Wed; on Friday the full Mon-Fri week. The portfolio leg is
+    time-weighted (chained through ``flow`` columns plus today's ``flow_today``),
+    so mid-week deposits contribute zero. Returns None until a baseline exists
+    (first week of history). spy fields are None when either end of the SPY
+    pair is missing.
     """
     monday = today - dt.timedelta(days=today.weekday())
     cutoff = monday.isoformat()
-    baseline = None
-    for p in curve:  # curve is chronological; keep the last qualifying point
+    today_str = today.isoformat()
+    rows = [p for p in curve if str(p["date"]) < today_str]
+    baseline_i = None
+    for i, p in enumerate(rows):  # chronological; keep the last qualifying point
         if str(p["date"]) < cutoff and p.get("nav") and float(p["nav"]) > 0:
-            baseline = p
-    if baseline is None:
+            baseline_i = i
+    if baseline_i is None:
         return None
-    port = pct_change(nav_now, float(baseline["nav"]))
+    baseline = rows[baseline_i]
+    index = twr_index(rows + [{"date": today_str, "nav": nav_now, "flow": flow_today}])
+    port = pct_change(index[-1], index[baseline_i])
     base_spy = baseline.get("spy_close")
     spy = pct_change(spy_now, float(base_spy)) if (spy_now and base_spy) else None
     return {

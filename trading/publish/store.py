@@ -15,9 +15,12 @@ class SupabaseStore:
     def upsert_snapshot(self, row: dict) -> None:
         self._c.table("snapshot").upsert({**row, "id": 1}, on_conflict="id").execute()
 
-    def upsert_equity_point(self, date: str, nav: float, spy_close: float | None) -> None:
+    def upsert_equity_point(
+        self, date: str, nav: float, spy_close: float | None, flow: float = 0.0
+    ) -> None:
         self._c.table("equity_curve").upsert(
-            {"date": date, "nav": nav, "spy_close": spy_close}, on_conflict="date"
+            {"date": date, "nav": nav, "spy_close": spy_close, "flow": flow},
+            on_conflict="date",
         ).execute()
 
     def replace_holdings(self, rows: list[dict]) -> None:

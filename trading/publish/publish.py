@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from trading.publish.flows import load_flows, save_flows
 from trading.publish.metrics import (
     compute_day_pnl,
     compute_execution_quality,
@@ -26,7 +27,10 @@ from trading.publish.metrics import (
     compute_risk,
     compute_turnover,
     compute_week_to_date,
+    detect_flow,
+    holdings_day_pnl,
     pct_change,
+    twr_index,
 )
 from trading.publish.reconstruct import (
     current_holdings,
@@ -63,13 +67,20 @@ def _prior_weights(weights_dir, asof: str) -> dict[str, float]:
 
 
 def publish_live(broker, store, *, weights_dir, orders_dir, asof, today, spy_last,
-                 fetch_metadata=None):
+                 fetch_metadata=None, flows_path=None):
     """Compute and write one snapshot from live broker account data.
 
     NAV is the broker's NetLiquidation and the per-holding rows (incl. day /
     unrealized P&L) come from ``broker.get_portfolio()`` — account-channel
     data, so no market-data subscription and the numbers match the broker's
     own app. ``spy_last`` is the latest SPY print (yfinance; benchmark only).
+
+    All return metrics are time-weighted: external cash flows (deposits land
+    weekly) are auto-detected as the ΔNAV the broker's account-level day P&L
+    can't explain, recorded in the ``flows_path`` ledger + the equity point's
+    ``flow`` column, and stripped from every growth figure via the chained TWR
+    index. An existing ledger entry for today (manual stamp) beats detection.
+
     ``fetch_metadata`` is an optional callable ``tickers -> {ticker:
     {company_name, sector}}`` (injected so tests stay network-free; main()
     passes the real Sharadar fetcher). Returns a small summary dict.
@@ -84,6 +95,12 @@ def publish_live(broker, store, *, weights_dir, orders_dir, asof, today, spy_las
     try:
         portfolio = broker.get_portfolio()
         nav = float(broker.get_nav())
+        try:
+            account_pnl = broker.get_account_pnl()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("publish: account-level P&L unavailable (%s) — "
+                           "falling back to per-holding sum", exc)
+            account_pnl = None
     finally:
         broker.disconnect()
     positions = {p["ticker"]: float(p["position"]) for p in portfolio}
@@ -107,31 +124,54 @@ def publish_live(broker, store, *, weights_dir, orders_dir, asof, today, spy_las
             logger.warning("publish: ticker metadata unavailable (%s)", exc)
 
     # 3. Equity history (for prior NAV, inception baselines, risk series).
+    # Ledger flows override the stored flow column so hand edits to past dates
+    # take effect immediately, not only after a --from-audit rebuild.
     curve = store.read_equity_curve()
+    flows = load_flows(flows_path)
+    for p in curve:
+        if str(p["date"]) in flows:
+            p["flow"] = flows[str(p["date"])]
     prev_nav = _prev_nav(curve, today)
-    inception_nav = float(curve[0]["nav"]) if curve else nav
     inception_spy = next(
         (p["spy_close"] for p in curve if p.get("spy_close") is not None), spy_last
     )
     today_str = str(today.date())
-    navs = [float(p["nav"]) for p in curve if str(p["date"]) < today_str] + [nav]
 
-    # 4. Metrics.
+    # 4. Day P&L (broker truth — deposit-immune) and today's external flow.
+    day_pnl = account_pnl.get("daily_pnl") if account_pnl else None
+    if day_pnl is None:
+        day_pnl = holdings_day_pnl(portfolio)
+    if today_str in flows:  # manual stamp beats detection
+        flow_today = flows[today_str]
+    else:
+        flow_today = detect_flow(nav, prev_nav, day_pnl)
+        if flow_today != 0.0 and flows_path is not None:
+            flows[today_str] = flow_today
+            save_flows(flows_path, flows)
+            logger.info("publish: external flow detected on %s: %+.2f (recorded to %s)",
+                        today_str, flow_today, flows_path)
+    if day_pnl is None and prev_nav is not None:
+        day_pnl = nav - prev_nav - flow_today  # last resort: flow-adjusted ΔNAV
+    day_pnl_pct = (day_pnl / prev_nav) if (day_pnl is not None and prev_nav) else None
+
+    # 5. Metrics off the TWR index — deposits compound at zero everywhere.
     holdings = compute_holdings_live(portfolio, target_weights, nav, metadata=metadata)
-    day_pnl, day_pnl_pct = compute_day_pnl(nav, prev_nav)
-    risk = compute_risk(navs)
-    week_vs_spy = compute_week_to_date(curve, today.date(), nav, spy_last)
+    prior_rows = [p for p in curve if str(p["date"]) < today_str]
+    index = twr_index(prior_rows + [{"date": today_str, "nav": nav, "flow": flow_today}])
+    risk = compute_risk(index)
+    week_vs_spy = compute_week_to_date(curve, today.date(), nav, spy_last,
+                                       flow_today=flow_today)
     invested = sum(h["market_value"] for h in holdings)
 
-    # 5. Writes (equity point first so it is present for the next run).
-    store.upsert_equity_point(today_str, nav, spy_last)
+    # 6. Writes (equity point first so it is present for the next run).
+    store.upsert_equity_point(today_str, nav, spy_last, flow=flow_today)
     store.upsert_snapshot(
         {
             "asof": today_str,
             "nav": nav,
             "day_pnl": day_pnl,
             "day_pnl_pct": day_pnl_pct,
-            "total_return": pct_change(nav, inception_nav),
+            "total_return": (index[-1] - 1.0) if index else 0.0,
             "spy_return": pct_change(spy_last, inception_spy),
             "week_vs_spy": week_vs_spy,
             "n_positions": len(holdings),
@@ -158,16 +198,18 @@ def publish_live(broker, store, *, weights_dir, orders_dir, asof, today, spy_las
         exec_rows = compute_execution_quality(_load_json(orders_path))
         store.insert_executions(asof, [{**r, "asof": asof} for r in exec_rows])
 
-    return {"asof": asof, "nav": nav, "n_holdings": len(holdings)}
+    return {"asof": asof, "nav": nav, "n_holdings": len(holdings), "flow": flow_today}
 
 
 def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fetch,
-                       fetch_metadata=None):
+                       fetch_metadata=None, flows_path=None):
     """Compute and write one snapshot from the order audit + injected prices.
 
     `price_fetch(tickers, start, end) -> DataFrame` returns forward-filled daily
     closes indexed by normalized date, one column per ticker (see
-    sources.fetch_close_history). No broker is contacted. Returns a summary dict.
+    sources.fetch_close_history). No broker is contacted. External flows come
+    from the ``flows_path`` ledger so a rebuild reproduces deposit-aware NAVs
+    and TWR metrics. Returns a summary dict.
     """
     asof = str(pd.Timestamp(asof).date())
     today = pd.Timestamp(today).normalize()
@@ -193,10 +235,12 @@ def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fet
     closes = price_fetch(tickers + ["SPY"], start, today + pd.Timedelta(days=1))
     spy_history = closes["SPY"] if "SPY" in closes.columns else pd.Series(dtype=float)
 
-    curve = reconstruct_curve(history, closes, spy_history)
+    flows = load_flows(flows_path)
+    curve = reconstruct_curve(history, closes, spy_history, flows=flows)
     navs = [p["nav"] for p in curve]
     nav = navs[-1] if navs else 0.0
     prev_nav = navs[-2] if len(navs) >= 2 else None
+    flow_last = float(curve[-1].get("flow") or 0.0) if curve else 0.0
 
     latest_closes = {
         t: float(closes[t].iloc[-1]) for t in holdings_shares
@@ -211,16 +255,18 @@ def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fet
             logger.warning("publish: ticker metadata unavailable (%s)", exc)
 
     holdings = compute_holdings(holdings_shares, latest_closes, target_weights, nav, metadata=metadata)
-    day_pnl, day_pnl_pct = compute_day_pnl(nav, prev_nav)
-    risk = compute_risk(navs)
+    # Day P&L net of any flow that landed on the last curve date (deposit ≠ gain).
+    day_pnl, day_pnl_pct = compute_day_pnl(nav - flow_last, prev_nav)
+    index = twr_index(curve)
+    risk = compute_risk(index)
     invested = sum(h["market_value"] for h in holdings)
-    inception_nav = navs[0] if navs else nav
     inception_spy = next((p["spy_close"] for p in curve if p["spy_close"] is not None), None)
     spy_now = curve[-1]["spy_close"] if curve else None
     today_str = str(today.date())
     # Week-to-date needs a baseline STRICTLY before this week's Monday, so feed
     # it the curve minus its own last point (today's reconstruction).
-    week_vs_spy = compute_week_to_date(curve[:-1], today.date(), nav, spy_now)
+    week_vs_spy = compute_week_to_date(curve[:-1], today.date(), nav, spy_now,
+                                       flow_today=flow_last)
 
     store.replace_equity_curve(curve)
     store.upsert_snapshot(
@@ -229,7 +275,7 @@ def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fet
             "nav": nav,
             "day_pnl": day_pnl,
             "day_pnl_pct": day_pnl_pct,
-            "total_return": pct_change(nav, inception_nav),
+            "total_return": (index[-1] - 1.0) if index else 0.0,
             "spy_return": pct_change(spy_now, inception_spy),
             "week_vs_spy": week_vs_spy,
             "n_positions": len(holdings),
@@ -352,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
             today=today,
             price_fetch=fetch_close_history,
             fetch_metadata=fetch_ticker_metadata,
+            flows_path=config.CAPITAL_FLOWS_PATH,
         )
         logger.info("publish: done (from-audit) — %s", summary)
         return 0
@@ -374,6 +421,7 @@ def main(argv: list[str] | None = None) -> int:
             today=today,
             spy_last=fetch_spy_last(),
             fetch_metadata=fetch_ticker_metadata,
+            flows_path=config.CAPITAL_FLOWS_PATH,
         )
     except (OSError, TimeoutError) as exc:
         if args.intraday:

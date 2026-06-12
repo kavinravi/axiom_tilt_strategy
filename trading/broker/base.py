@@ -63,6 +63,16 @@ class Broker(ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not implement get_portfolio()")
 
+    def get_account_pnl(self) -> dict:
+        """Account-level P&L from the broker's account channel.
+
+        Returns {daily_pnl, unrealized_pnl, realized_pnl} (None when the broker
+        has no figure). Unlike summing per-position rows, this includes the
+        realized P&L of positions fully closed today. Non-abstract (default
+        raises) so existing Broker fakes keep working until they need it.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not implement get_account_pnl()")
+
     # ------------------------------------------------------------------
     # Non-blocking order submission
     # ------------------------------------------------------------------

@@ -36,6 +36,9 @@ export interface EquityPoint {
   date: string;
   nav: number;
   spy_close: number | null;
+  // External cash that landed this date (deposit +, withdrawal -); the chart
+  // chains returns through (nav - flow) so deposits contribute zero growth.
+  flow?: number | null;
 }
 export interface Holding {
   ticker: string;

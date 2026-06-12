@@ -138,6 +138,29 @@ def test_reconstruct_curve_ticker_absent_from_columns(tmp_path):
     assert curve[1]["nav"] == 100.0
 
 
+def test_reconstruct_curve_no_flows_arg_rows_carry_zero_flow(tmp_path):
+    hist = _curve_fixture(tmp_path)
+    idx = pd.to_datetime(["2026-06-05", "2026-06-08"]).normalize()
+    closes = pd.DataFrame({"AAA": [180.0, 200.0], "SPY": [500.0, 510.0]}, index=idx)
+    curve = reconstruct.reconstruct_curve(hist, closes, closes["SPY"])
+    assert all(p["flow"] == 0.0 for p in curve)
+
+
+def test_reconstruct_curve_flows_add_to_cash_and_stamp_rows(tmp_path):
+    hist = _curve_fixture(tmp_path)  # cash residual 100, holds 5 AAA
+    idx = pd.to_datetime(["2026-06-05", "2026-06-08", "2026-06-09"]).normalize()
+    closes = pd.DataFrame({"AAA": [180.0, 200.0, 200.0],
+                           "SPY": [500.0, 510.0, 512.0]}, index=idx)
+    flows = {"2026-06-08": 750.0}
+    curve = reconstruct.reconstruct_curve(hist, closes, closes["SPY"], flows=flows)
+    # 06-05 anchored to first_build capital (no flow that day).
+    assert curve[0]["nav"] == 1000.0 and curve[0]["flow"] == 0.0
+    # 06-08: 100 cash + 750 deposit + 5*200 = 1850; row carries the flow.
+    assert curve[1]["nav"] == 1850.0 and curve[1]["flow"] == 750.0
+    # 06-09: deposit stays in cash until deployed.
+    assert curve[2]["nav"] == 1850.0 and curve[2]["flow"] == 0.0
+
+
 def test_reconstruct_curve_inception_uses_starting_capital_not_close(tmp_path):
     # Bought 5 AAA at avg 190 (notional 950) out of 1000 -> cash residual 50.
     # The Friday close (170) is BELOW cost, so a mark-to-close baseline would invent

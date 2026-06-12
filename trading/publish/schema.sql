@@ -27,6 +27,10 @@ create table if not exists equity_curve (
   nav        double precision not null,
   spy_close  double precision
 );
+-- External cash flow (deposit +, withdrawal -) that landed on this date,
+-- auto-detected by the publisher as ΔNAV minus the broker's account-level day
+-- P&L. Lets every return metric be time-weighted: deposits compound at zero.
+alter table equity_curve add column if not exists flow double precision;
 
 create table if not exists holdings (
   asof          timestamptz not null,

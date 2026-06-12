@@ -99,6 +99,10 @@ class DryRunBroker(Broker):
             )
         return rows
 
+    def get_account_pnl(self) -> dict:
+        """Synthetic account-level P&L: flat zero, matching get_portfolio()."""
+        return {"daily_pnl": 0.0, "unrealized_pnl": 0.0, "realized_pnl": 0.0}
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

@@ -66,7 +66,16 @@ def test_upsert_equity_point_conflicts_on_date():
     c = _FakeClient()
     SupabaseStore(c).upsert_equity_point("2026-06-03", 100.0, 5000.0)
     assert ("upsert", "equity_curve",
-            {"date": "2026-06-03", "nav": 100.0, "spy_close": 5000.0}, "date") in c.log
+            {"date": "2026-06-03", "nav": 100.0, "spy_close": 5000.0, "flow": 0.0},
+            "date") in c.log
+
+
+def test_upsert_equity_point_carries_flow():
+    c = _FakeClient()
+    SupabaseStore(c).upsert_equity_point("2026-06-12", 176_435.05, 5000.0, flow=75_242.19)
+    assert ("upsert", "equity_curve",
+            {"date": "2026-06-12", "nav": 176_435.05, "spy_close": 5000.0,
+             "flow": 75_242.19}, "date") in c.log
 
 
 def test_replace_holdings_deletes_then_inserts():

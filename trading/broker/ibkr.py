@@ -25,6 +25,11 @@ _QUOTE_WAIT_SEC = 3.0          # seconds to wait for real-time bid/ask
 _QUOTE_DELAYED_WAIT_SEC = 5.0  # seconds to wait after switching to delayed data
 
 
+def _clean_num(v) -> float | None:
+    """None for missing/NaN broker figures, float otherwise."""
+    return None if v is None or (isinstance(v, float) and math.isnan(v)) else float(v)
+
+
 def _map_status(ib_status: str) -> str:
     """Map ib_async order status string to our Fill.status vocab."""
     s = ib_status.lower()
@@ -138,9 +143,6 @@ class IBKRBroker(Broker):
         if pnl_reqs:
             self.ib.sleep(2.0)
 
-        def _clean(v) -> float | None:
-            return None if v is None or (isinstance(v, float) and math.isnan(v)) else float(v)
-
         rows: list[dict] = []
         for it in items:
             ps = pnl_reqs.get(it.contract.conId)
@@ -148,11 +150,11 @@ class IBKRBroker(Broker):
                 {
                     "ticker": it.contract.symbol,
                     "position": float(it.position),
-                    "market_price": _clean(it.marketPrice),
-                    "market_value": _clean(it.marketValue),
-                    "avg_cost": _clean(it.averageCost),
-                    "unrealized_pnl": _clean(it.unrealizedPNL),
-                    "daily_pnl": _clean(getattr(ps, "dailyPnL", None)),
+                    "market_price": _clean_num(it.marketPrice),
+                    "market_value": _clean_num(it.marketValue),
+                    "avg_cost": _clean_num(it.averageCost),
+                    "unrealized_pnl": _clean_num(it.unrealizedPNL),
+                    "daily_pnl": _clean_num(getattr(ps, "dailyPnL", None)),
                 }
             )
         for con_id in pnl_reqs:
@@ -162,6 +164,30 @@ class IBKRBroker(Broker):
                 logger.warning("IBKRBroker: cancelPnLSingle(%s) raised (harmless): %s", con_id, exc)
         logger.info("IBKRBroker: get_portfolio() → %d positions", len(rows))
         return rows
+
+    def get_account_pnl(self) -> dict:
+        """Account-level day/unrealized/realized P&L via reqPnL.
+
+        Account-channel data (free, no quote entitlement). Includes the realized
+        P&L of positions fully closed today, which a per-position sum misses.
+        """
+        accounts = self.ib.managedAccounts()
+        account = accounts[0] if accounts else ""
+        pnl = self.ib.reqPnL(account, "")
+        try:
+            self.ib.sleep(2.0)  # let the account channel populate
+            out = {
+                "daily_pnl": _clean_num(getattr(pnl, "dailyPnL", None)),
+                "unrealized_pnl": _clean_num(getattr(pnl, "unrealizedPnL", None)),
+                "realized_pnl": _clean_num(getattr(pnl, "realizedPnL", None)),
+            }
+        finally:
+            try:
+                self.ib.cancelPnL(account, "")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("IBKRBroker: cancelPnL raised (harmless): %s", exc)
+        logger.info("IBKRBroker: get_account_pnl() → %s", out)
+        return out
 
     def get_quote(self, ticker: str) -> tuple[float, float]:
         """Return (bid, ask) for *ticker*.

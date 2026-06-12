@@ -217,6 +217,107 @@ def test_week_to_date_empty_curve_returns_none():
     assert compute_week_to_date([], dt.date(2026, 6, 10), 100_000.0, 5000.0) is None
 
 
+def test_week_to_date_mid_week_deposit_contributes_zero():
+    # $75k landed Wednesday: nav_now jumped but the week's return must chain
+    # through (nav - flow), not compare raw NAVs across the deposit.
+    curve = [
+        {"date": "2026-06-05", "nav": 100_000.0, "spy_close": 5000.0},        # Fri baseline
+        {"date": "2026-06-08", "nav": 101_000.0, "spy_close": 5060.0},        # Mon
+        {"date": "2026-06-09", "nav": 102_000.0, "spy_close": 5040.0},        # Tue
+    ]
+    out = compute_week_to_date(curve, dt.date(2026, 6, 10),
+                               nav_now=177_000.0, spy_now=5100.0, flow_today=75_000.0)
+    # (101/100) * (102/101) * ((177-75)/102) = 1.02
+    assert math.isclose(out["portfolio_return"], 0.02)
+
+
+def test_week_to_date_deposit_on_earlier_curve_row_is_stripped():
+    # The deposit landed Monday and is recorded on that row's flow column.
+    curve = [
+        {"date": "2026-06-05", "nav": 100_000.0, "spy_close": 5000.0},
+        {"date": "2026-06-08", "nav": 176_000.0, "spy_close": 5060.0, "flow": 75_000.0},
+    ]
+    out = compute_week_to_date(curve, dt.date(2026, 6, 10),
+                               nav_now=177_760.0, spy_now=5100.0)
+    # Mon: (176000-75000)/100000 = 1.01; Wed: 177760/176000 = 1.01 → 2.01% total
+    assert math.isclose(out["portfolio_return"], 1.01 * 1.01 - 1.0)
+
+
+# ---------------------------------------------------------------------------
+# twr_index / detect_flow / holdings_day_pnl — flow-adjusted return plumbing
+# ---------------------------------------------------------------------------
+
+from trading.publish.metrics import detect_flow, holdings_day_pnl, twr_index
+
+
+def test_twr_index_no_flows_matches_nav_ratio():
+    curve = [{"nav": 100.0}, {"nav": 110.0}, {"nav": 99.0}]
+    idx = twr_index(curve)
+    assert idx[0] == 1.0
+    assert math.isclose(idx[1], 1.1)
+    assert math.isclose(idx[2], 0.99)
+
+
+def test_twr_index_deposit_day_contributes_zero_growth():
+    # NAV jumps 100k → 176k on a 75k deposit day with 1k of real P&L.
+    curve = [{"nav": 100_000.0}, {"nav": 176_000.0, "flow": 75_000.0}]
+    idx = twr_index(curve)
+    assert math.isclose(idx[1], 1.01)
+
+
+def test_twr_index_withdrawal_is_added_back():
+    # 10k withdrawn, market flat: no fake loss.
+    curve = [{"nav": 100_000.0}, {"nav": 90_000.0, "flow": -10_000.0}]
+    assert math.isclose(twr_index(curve)[1], 1.0)
+
+
+def test_twr_index_carries_flat_across_non_positive_nav():
+    curve = [{"nav": 100.0}, {"nav": 0.0}, {"nav": 50.0}]
+    idx = twr_index(curve)
+    assert idx[1] == 0.0          # 0/100 — measurable, a total loss that day
+    assert idx[2] == 0.0          # prior nav 0 → unmeasurable → flat carry
+
+
+def test_twr_index_none_flow_treated_as_zero():
+    curve = [{"nav": 100.0}, {"nav": 105.0, "flow": None}]
+    assert math.isclose(twr_index(curve)[1], 1.05)
+
+
+def test_detect_flow_deposit_above_threshold():
+    # ΔNAV +75,600 with only +358 of day P&L → 75,242 implied deposit.
+    assert math.isclose(
+        detect_flow(176_435.05, 100_835.0, 357.86), 176_435.05 - 100_835.0 - 357.86
+    )
+
+
+def test_detect_flow_small_residual_is_yield_not_flow():
+    # $400 of ΔNAV unexplained by P&L (dividends/interest) stays a return.
+    assert detect_flow(100_500.0, 100_000.0, 100.0) == 0.0
+
+
+def test_detect_flow_threshold_scales_with_nav():
+    # 0.5% of a $1M book is $5,000 — a $3k residual is below it.
+    assert detect_flow(1_003_000.0, 1_000_000.0, 0.0, min_abs=1000.0) == 0.0
+
+
+def test_detect_flow_unavailable_inputs_return_zero():
+    assert detect_flow(100_000.0, None, 500.0) == 0.0
+    assert detect_flow(100_000.0, 99_000.0, None) == 0.0
+
+
+def test_detect_flow_withdrawal_is_negative():
+    assert math.isclose(detect_flow(90_000.0, 100_000.0, 0.0), -10_000.0)
+
+
+def test_holdings_day_pnl_sums_present_values():
+    portfolio = [{"daily_pnl": 10.0}, {"daily_pnl": -2.5}, {"daily_pnl": None}]
+    assert math.isclose(holdings_day_pnl(portfolio), 7.5)
+
+
+def test_holdings_day_pnl_none_when_no_figures():
+    assert holdings_day_pnl([{"daily_pnl": None}, {}]) is None
+
+
 # ---------------------------------------------------------------------------
 # compute_holdings_live — broker portfolio rows (IB-mobile style P&L)
 # ---------------------------------------------------------------------------

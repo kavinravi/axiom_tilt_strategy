@@ -60,6 +60,10 @@ LADDER_MIDPRICE_WAIT_SEC = 120       # stage 2 wait before terminal cross
 LADDER_CANCEL_GRACE_SEC = 3          # settle wait after cancels (allow cancel ACK to propagate)
 LADDER_TERMINAL_CROSS = True         # stage 3: cross the spread near close to guarantee completion
 ORDERS_DIR = AUDIT_DIR / "orders"    # per-run order/fill audit logs
+# External deposits/withdrawals by landing date ({"YYYY-MM-DD": amount}); the
+# publisher auto-detects and records them, hand-editable for corrections.
+# Gitignored with the rest of the audit dir — real account flows stay private.
+CAPITAL_FLOWS_PATH = AUDIT_DIR / "capital_flows.json"
 
 # ---------------------------------------------------------------------------
 # Dashboard publisher (read-only push to Supabase). Outbound-only; the VPS opens

@@ -59,14 +59,25 @@ def cash_after(history: list[dict]) -> float:
     return cash
 
 
-def reconstruct_curve(history: list[dict], close_history: pd.DataFrame, spy_history: pd.Series | None) -> list[dict]:
-    """Daily {date, nav, spy_close} from inception through the last price date.
+def reconstruct_curve(
+    history: list[dict],
+    close_history: pd.DataFrame,
+    spy_history: pd.Series | None,
+    flows: dict[str, float] | None = None,
+) -> list[dict]:
+    """Daily {date, nav, spy_close, flow} from inception through the last price date.
 
     close_history: DataFrame indexed by normalized date, columns = tickers, values
     = daily close. spy_history: Series indexed by the same dates. For each day d:
     holdings/cash come from the latest rebalance with asof <= d; nav = cash +
     sum(shares * close). A missing/NaN close contributes zero (price comes in via
     the forward-filled frame from fetch_close_history).
+
+    flows: external cash by landing date {"YYYY-MM-DD": amount} (deposit positive).
+    Flow cash sits in the account until a later rebalance deploys it, so each
+    day's NAV adds the cumulative flows to date — without this, post-deposit
+    rebalances would drive reconstructed cash negative. Flows on the inception
+    date itself are unsupported (day 0 is anchored to the first_build capital).
 
     The inception-date point is anchored to the starting capital (the first_build
     record's pre-trade `nav`), i.e. holdings valued at cost basis on day 0 rather
@@ -77,6 +88,7 @@ def reconstruct_curve(history: list[dict], close_history: pd.DataFrame, spy_hist
     """
     if not history or close_history is None or len(close_history.index) == 0:
         return []
+    flows = flows or {}
     start = inception_date(history)
     start_nav = float(_first_build(history)["nav"])
     rows: list[dict] = []
@@ -89,7 +101,9 @@ def reconstruct_curve(history: list[dict], close_history: pd.DataFrame, spy_hist
             continue
         # holdings/cash are recomputed per date but only change when `applied` grows
         holdings = current_holdings(applied)
-        cash = cash_after(applied)
+        date_str = str(d.date())
+        flows_cum = sum(v for k, v in flows.items() if k <= date_str)
+        cash = cash_after(applied) + flows_cum
         mv = 0.0
         for ticker, shares in holdings.items():
             if ticker in close_history.columns:
@@ -100,8 +114,9 @@ def reconstruct_curve(history: list[dict], close_history: pd.DataFrame, spy_hist
         # Inception day reflects the capital deployed (cost basis), not the close.
         nav = start_nav if d == start else cash + mv
         rows.append({
-            "date": str(d.date()),
+            "date": date_str,
             "nav": nav,
             "spy_close": (float(spy) if spy is not None and not pd.isna(spy) else None),
+            "flow": float(flows.get(date_str, 0.0)),
         })
     return rows
