@@ -8,11 +8,13 @@ function stripes(base: string, stripe: string): string {
   return `repeating-linear-gradient(45deg, ${base} 0px, ${base} 4px, ${stripe} 4px, ${stripe} 8px)`;
 }
 
+// Two color families (mid-dark, light); within each, striped = the lower bin
+// and solid = the higher — dashed patterns intuitively read as "partial".
 const BINS: { min: number; label: string; bg: string }[] = [
-  { min: 0.075, label: "≥7.5%", bg: stripes("#a7f3d0", "#34d399") },
-  { min: 0.05, label: "5–7.5%", bg: "#34d399" },
-  { min: 0.025, label: "2.5–5%", bg: stripes("#059669", "#065f46") },
-  { min: 1e-9, label: "<2.5%", bg: "#065f46" },
+  { min: 0.075, label: "≥7.5%", bg: "#a7f3d0" },
+  { min: 0.05, label: "5–7.5%", bg: stripes("#a7f3d0", "#34d399") },
+  { min: 0.025, label: "2.5–5%", bg: "#059669" },
+  { min: 1e-9, label: "<2.5%", bg: stripes("#059669", "#065f46") },
   { min: -Infinity, label: "not held", bg: "#171717" },
 ];
 
