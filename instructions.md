@@ -23,7 +23,7 @@ date to that Friday (or omit `--asof` if you run it on Friday itself).
 
 ---
 
-## Monday — execute with REAL MONEY
+## Monday — execute with REAL MONEY (at 12PM PST)
 
 **0. Point `.env` at the live account (one-time):**
 ```
