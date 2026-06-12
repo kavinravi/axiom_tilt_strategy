@@ -5,11 +5,15 @@ import { fmtMoney, fmtPct, fmtSignedMoney } from "@/lib/format";
 
 const CAP = 0.10;
 
-export function HoldingRow({ h }: { h: Holding }) {
+export function HoldingRow({ h, investedFrac = 1 }: { h: Holding; investedFrac?: number }) {
   const [open, setOpen] = useState(false);
-  const w = h.weight_actual ?? 0;
+  const wAccount = h.weight_actual ?? 0;
+  // Weight within the invested book (weight_actual is stored vs total NAV,
+  // which includes cash awaiting the next rebalance).
+  const w = wAccount / (investedFrac > 0 ? investedFrac : 1);
   const noQuote = (h.price ?? 0) === 0 && h.shares > 0;
   const pctOfCap = Math.min(w / CAP, 1) * 100;
+  const overCap = w > CAP + 1e-9;
   const dayPnl = h.daily_pnl ?? null;
   const dayTone =
     dayPnl == null ? "text-neutral-500" : dayPnl >= 0 ? "text-emerald-400" : "text-red-400";
@@ -21,7 +25,10 @@ export function HoldingRow({ h }: { h: Holding }) {
           {h.company_name && <span className="truncate text-[11px] text-neutral-500">{h.company_name}</span>}
         </span>
         <span className="relative h-3 flex-1 overflow-hidden rounded bg-neutral-800">
-          <span className="absolute inset-y-0 left-0 bg-emerald-500" style={{ width: `${pctOfCap}%` }} />
+          <span
+            className={`absolute inset-y-0 left-0 ${overCap ? "bg-amber-400" : "bg-emerald-500"}`}
+            style={{ width: `${pctOfCap}%` }}
+          />
         </span>
         <span
           className={`w-20 text-right text-xs tabular-nums ${dayTone}`}
@@ -40,6 +47,12 @@ export function HoldingRow({ h }: { h: Holding }) {
           <span>Price: {fmtMoney(h.price)}</span>
           <span>Value: {fmtMoney(h.market_value)}</span>
           <span>Avg cost: {fmtMoney(h.avg_cost ?? null)}</span>
+          <span>Share of whole account: {fmtPct(wAccount)}</span>
+          {overCap ? (
+            <span className="text-amber-300">Above the 10% cap — trimmed at next rebalance</span>
+          ) : (
+            <span />
+          )}
           <span className={dayTone}>Today&apos;s P&L: {fmtSignedMoney(dayPnl)}</span>
           <span className={
             (h.unrealized_pnl ?? 0) >= 0 && h.unrealized_pnl != null

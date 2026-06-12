@@ -9,7 +9,12 @@ import { AsOf } from "@/components/AsOf";
 import { SectorComparison } from "@/components/SectorComparison";
 import { aggregateSectors } from "@/lib/sectors";
 
-type Payload = { holdings: Holding[]; asof: string | null };
+type Payload = {
+  holdings: Holding[];
+  asof: string | null;
+  nav: number | null;
+  invested_pct: number | null;
+};
 
 function HoldingsInner() {
   const scenario = useSearchParams().get("scenario");
@@ -32,7 +37,11 @@ function HoldingsInner() {
   return (
     <div className="space-y-3">
       <div className="flex justify-end"><AsOf iso={data?.asof ?? null} /></div>
-      <ConcentrationBars holdings={holdings} />
+      <ConcentrationBars
+        holdings={holdings}
+        nav={data?.nav ?? null}
+        investedPct={data?.invested_pct ?? null}
+      />
       <SectorComparison
         portfolio={aggregateSectors(holdings, "weight_actual")}
         title="Sector Allocation"
