@@ -46,7 +46,7 @@ The API is then on `127.0.0.1:4002` (paper) / `4001` (live).
 ## 3. Deploy the code
 ```bash
 git clone <repo> ~/axiom_tilt_strategy && cd ~/axiom_tilt_strategy
-python3 -m venv .venv && .venv/bin/pip install -e .
+python3 -m venv .venv && .venv/bin/pip install -r deploy/requirements-vps.txt
 cp /path/to/.env .env      # data keys + SUPABASE_* + ALERT_* ; set IBKR_HOST=127.0.0.1
 .venv/bin/python -m trading.run weights       # smoke test (no Gateway needed)
 ```
