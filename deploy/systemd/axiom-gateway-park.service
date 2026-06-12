@@ -1,0 +1,7 @@
+[Unit]
+Description=Axiom Tilt - park IB Gateway before the Sunday 01:00 ET token reset
+
+[Service]
+Type=oneshot
+# Stopped container = no login attempts against a dead token = no 2FA push spam.
+ExecStart=/usr/bin/docker compose -f %h/axiom_tilt_strategy/deploy/ib-gateway/docker-compose.yml stop

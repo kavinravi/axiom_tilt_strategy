@@ -2,9 +2,9 @@
 Description=Daily after US close - EOD dashboard publish (broker truth)
 
 [Timer]
-# 16:30 America/New_York, every day. Reads the Gateway's account channel
-# (NetLiquidation marked at the close) and stamps the canonical daily point.
-OnCalendar=*-*-* 16:30 America/New_York
+# 16:30 America/New_York, weekdays only — a weekend run would stamp bogus
+# Sat/Sun points onto the equity curve from the broker's stale Friday marks.
+OnCalendar=Mon..Fri *-*-* 16:30 America/New_York
 Persistent=true
 
 [Install]

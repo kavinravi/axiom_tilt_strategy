@@ -1,0 +1,8 @@
+[Unit]
+Description=Axiom Tilt - wake IB Gateway for the weekly re-auth (one 2FA push, scheduled)
+
+[Service]
+Type=oneshot
+# First login after the Sunday reset -> exactly one IB Key push at this minute.
+# If the tap is missed, IBC's TWOFA_TIMEOUT_ACTION=restart re-pushes every ~4 min.
+ExecStart=/usr/bin/docker compose -f %h/axiom_tilt_strategy/deploy/ib-gateway/docker-compose.yml up -d

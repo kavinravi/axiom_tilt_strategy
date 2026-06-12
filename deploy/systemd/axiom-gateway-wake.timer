@@ -1,0 +1,9 @@
+[Unit]
+Description=Sunday 20:00 ET (5 PM PT) - wake IB Gateway, weekly 2FA tap lands now
+
+[Timer]
+OnCalendar=Sun *-*-* 20:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target

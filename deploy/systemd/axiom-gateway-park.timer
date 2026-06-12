@@ -1,0 +1,9 @@
+[Unit]
+Description=Saturday 23:30 ET - park IB Gateway for the weekly token reset
+
+[Timer]
+OnCalendar=Sat *-*-* 23:30 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target
