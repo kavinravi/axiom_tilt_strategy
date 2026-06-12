@@ -4,14 +4,18 @@ import { twrReturns } from "@/lib/twr";
 import type { EquityPoint } from "@/lib/types";
 
 export function EquityChart({ points }: { points: EquityPoint[] }) {
-  const base = points[0];
   // Time-weighted: growth of invested capital, not of account balance —
   // deposits/withdrawals (flow column) contribute zero.
   const strategy = twrReturns(points);
+  // SPY baselines on the first trading day's close: point 0 is the pre-trading
+  // cost-basis anchor (capital frozen Friday, deployed Monday), and crediting
+  // SPY with the Fri→Mon move we sat out in cash would skew the comparison.
+  const spyBaseIdx = points.findIndex((p, i) => i > 0 && p.spy_close != null);
+  const spyBase = spyBaseIdx > 0 ? points[spyBaseIdx].spy_close : null;
   const data = points.map((p, i) => ({
     date: p.date,
     Strategy: strategy[i],
-    SPY: base?.spy_close && p.spy_close ? p.spy_close / base.spy_close - 1 : null,
+    SPY: spyBase && p.spy_close && i >= spyBaseIdx ? p.spy_close / spyBase - 1 : null,
   }));
   return (
     <div className="h-56 w-full rounded-lg bg-neutral-900 p-3 ring-1 ring-neutral-800">

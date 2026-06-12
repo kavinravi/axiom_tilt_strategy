@@ -221,9 +221,10 @@ def test_publish_live_week_vs_spy_in_snapshot(tmp_path):
                  orders_dir=tmp_path / "orders", asof=asof, today=today,
                  spy_last=5100.0)
     w = store.snapshot["week_vs_spy"]
-    assert w["baseline_date"] == "2026-06-05"
-    assert _math.isclose(w["portfolio_return"], 0.03)        # 10300/10000 - 1
-    assert _math.isclose(w["spy_return"], 5100.0 / 5000.0 - 1.0)
+    # "From Monday until now": baseline is Monday's close, not prior Friday's.
+    assert w["baseline_date"] == "2026-06-08"
+    assert _math.isclose(w["portfolio_return"], 10_300.0 / 10_100.0 - 1.0)
+    assert _math.isclose(w["spy_return"], 5100.0 / 5020.0 - 1.0)
     assert _math.isclose(w["excess_return"], w["portfolio_return"] - w["spy_return"])
 
 
@@ -287,8 +288,10 @@ def test_publish_live_detected_flow_recorded_and_stripped(tmp_path):
     # Growth excludes the deposit: 100/99 - 1, not 176/99 - 1.
     assert _math.isclose(store.snapshot["total_return"], 100_000.0 / 99_000.0 - 1.0)
     w = store.snapshot["week_vs_spy"]
-    # Week = 06-08..06-12: the 99k→100k gain is in-week; the deposit is not.
-    assert _math.isclose(w["portfolio_return"], 100_000.0 / 99_000.0 - 1.0)
+    # Week baseline = first close of this week (06-11); since then the only
+    # ΔNAV is the deposit → flat.
+    assert w["baseline_date"] == "2026-06-11"
+    assert _math.isclose(w["portfolio_return"], 0.0, abs_tol=1e-12)
     assert store.snapshot["day_pnl"] == 0.0
 
 

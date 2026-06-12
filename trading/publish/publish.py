@@ -132,8 +132,11 @@ def publish_live(broker, store, *, weights_dir, orders_dir, asof, today, spy_las
         if str(p["date"]) in flows:
             p["flow"] = flows[str(p["date"])]
     prev_nav = _prev_nav(curve, today)
+    # SPY benchmark starts when the book does: row 0 is the pre-trading
+    # cost-basis anchor (capital frozen Friday, deployed Monday), so the
+    # inception SPY print is the FIRST trading day's close, not the anchor's.
     inception_spy = next(
-        (p["spy_close"] for p in curve if p.get("spy_close") is not None), spy_last
+        (p["spy_close"] for p in curve[1:] if p.get("spy_close") is not None), spy_last
     )
     today_str = str(today.date())
 
@@ -260,7 +263,8 @@ def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fet
     index = twr_index(curve)
     risk = compute_risk(index)
     invested = sum(h["market_value"] for h in holdings)
-    inception_spy = next((p["spy_close"] for p in curve if p["spy_close"] is not None), None)
+    # Benchmark starts on the first trading day, not the day-0 anchor row.
+    inception_spy = next((p["spy_close"] for p in curve[1:] if p["spy_close"] is not None), None)
     spy_now = curve[-1]["spy_close"] if curve else None
     today_str = str(today.date())
     # Week-to-date needs a baseline STRICTLY before this week's Monday, so feed

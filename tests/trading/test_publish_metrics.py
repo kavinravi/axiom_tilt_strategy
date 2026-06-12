@@ -182,27 +182,30 @@ _CURVE = [
 ]
 
 
-def test_week_to_date_baselines_on_prior_friday():
-    # Wednesday 2026-06-10: the week covers Mon-Wed, so the baseline is the
-    # prior Friday's close — Monday's move must be included.
+def test_week_to_date_baselines_on_mondays_close():
+    # Wednesday 2026-06-10: "from Monday until now" — the baseline is Monday's
+    # close (rebalance day), so the week tracks the new book over Tue-Wed.
     out = compute_week_to_date(_CURVE, dt.date(2026, 6, 10), nav_now=103_000.0, spy_now=5101.0)
-    assert out["baseline_date"] == "2026-06-05"
-    assert math.isclose(out["portfolio_return"], 0.03)
-    assert math.isclose(out["spy_return"], 5101.0 / 5050.0 - 1.0)
+    assert out["baseline_date"] == "2026-06-08"
+    assert math.isclose(out["portfolio_return"], 103_000.0 / 101_000.0 - 1.0)
+    assert math.isclose(out["spy_return"], 5101.0 / 5060.0 - 1.0)
     assert math.isclose(out["excess_return"],
                         out["portfolio_return"] - out["spy_return"])
 
 
-def test_week_to_date_on_monday_uses_prior_friday():
+def test_week_to_date_monday_intraday_falls_back_to_latest_close():
+    # Monday before this week has any close: "today so far" off Friday's close.
     out = compute_week_to_date(_CURVE, dt.date(2026, 6, 8), nav_now=101_000.0, spy_now=5060.0)
     assert out["baseline_date"] == "2026-06-05"
     assert math.isclose(out["portfolio_return"], 0.01)
 
 
-def test_week_to_date_no_baseline_returns_none():
-    # Curve starts this week → nothing strictly before Monday.
+def test_week_to_date_first_week_baselines_on_first_close():
+    # Curve starts this week: the week's first close IS a valid baseline.
     curve = [{"date": "2026-06-08", "nav": 100_000.0, "spy_close": 5000.0}]
-    assert compute_week_to_date(curve, dt.date(2026, 6, 10), 101_000.0, 5050.0) is None
+    out = compute_week_to_date(curve, dt.date(2026, 6, 10), 101_000.0, 5050.0)
+    assert out["baseline_date"] == "2026-06-08"
+    assert math.isclose(out["portfolio_return"], 0.01)
 
 
 def test_week_to_date_missing_spy_returns_none_spy_fields():
@@ -221,25 +224,25 @@ def test_week_to_date_mid_week_deposit_contributes_zero():
     # $75k landed Wednesday: nav_now jumped but the week's return must chain
     # through (nav - flow), not compare raw NAVs across the deposit.
     curve = [
-        {"date": "2026-06-05", "nav": 100_000.0, "spy_close": 5000.0},        # Fri baseline
-        {"date": "2026-06-08", "nav": 101_000.0, "spy_close": 5060.0},        # Mon
+        {"date": "2026-06-05", "nav": 100_000.0, "spy_close": 5000.0},        # Fri
+        {"date": "2026-06-08", "nav": 101_000.0, "spy_close": 5060.0},        # Mon (baseline)
         {"date": "2026-06-09", "nav": 102_000.0, "spy_close": 5040.0},        # Tue
     ]
     out = compute_week_to_date(curve, dt.date(2026, 6, 10),
                                nav_now=177_000.0, spy_now=5100.0, flow_today=75_000.0)
-    # (101/100) * (102/101) * ((177-75)/102) = 1.02
-    assert math.isclose(out["portfolio_return"], 0.02)
+    # From Monday's close: (102/101) * ((177-75)/102) = 102/101
+    assert math.isclose(out["portfolio_return"], 102_000.0 / 101_000.0 - 1.0)
 
 
-def test_week_to_date_deposit_on_earlier_curve_row_is_stripped():
-    # The deposit landed Monday and is recorded on that row's flow column.
+def test_week_to_date_deposit_on_tuesday_curve_row_is_stripped():
+    # The deposit landed Tuesday and is recorded on that row's flow column.
     curve = [
-        {"date": "2026-06-05", "nav": 100_000.0, "spy_close": 5000.0},
-        {"date": "2026-06-08", "nav": 176_000.0, "spy_close": 5060.0, "flow": 75_000.0},
+        {"date": "2026-06-08", "nav": 100_000.0, "spy_close": 5000.0},        # Mon (baseline)
+        {"date": "2026-06-09", "nav": 176_000.0, "spy_close": 5060.0, "flow": 75_000.0},
     ]
     out = compute_week_to_date(curve, dt.date(2026, 6, 10),
                                nav_now=177_760.0, spy_now=5100.0)
-    # Mon: (176000-75000)/100000 = 1.01; Wed: 177760/176000 = 1.01 → 2.01% total
+    # Tue: (176000-75000)/100000 = 1.01; Wed: 177760/176000 = 1.01 → 2.01% total
     assert math.isclose(out["portfolio_return"], 1.01 * 1.01 - 1.0)
 
 

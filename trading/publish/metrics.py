@@ -151,27 +151,30 @@ def compute_week_to_date(
     spy_now: float | None,
     flow_today: float = 0.0,
 ) -> dict | None:
-    """Trading-week-to-date: portfolio vs SPY since the prior week's last close.
+    """Trading-week-to-date: portfolio vs SPY from Monday's close until now.
 
-    The baseline is the most recent equity point STRICTLY before this week's
-    Monday, so Monday's move is always included: on Wednesday the comparison
-    covers Mon-Wed; on Friday the full Mon-Fri week. The portfolio leg is
-    time-weighted (chained through ``flow`` columns plus today's ``flow_today``),
-    so mid-week deposits contribute zero. Returns None until a baseline exists
-    (first week of history). spy fields are None when either end of the SPY
-    pair is missing.
+    The baseline is the FIRST equity point of the current week (normally
+    Monday's close — rebalance day, so the comparison tracks the new week's
+    book): on Wednesday it covers Tue-Wed; on Friday, Tue-Fri. Before the
+    week's first close exists (Monday intraday), it falls back to the latest
+    prior close, i.e. "today so far". The portfolio leg is time-weighted
+    (chained through ``flow`` columns plus today's ``flow_today``), so mid-week
+    deposits contribute zero. Returns None when there is no usable baseline
+    (empty history). spy fields are None when either end of the SPY pair is
+    missing.
     """
     monday = today - dt.timedelta(days=today.weekday())
     cutoff = monday.isoformat()
     today_str = today.isoformat()
     rows = [p for p in curve if str(p["date"]) < today_str]
-    baseline_i = None
-    for i, p in enumerate(rows):  # chronological; keep the last qualifying point
-        if str(p["date"]) < cutoff and p.get("nav") and float(p["nav"]) > 0:
-            baseline_i = i
-    if baseline_i is None:
+    valid = [(i, p) for i, p in enumerate(rows) if p.get("nav") and float(p["nav"]) > 0]
+    this_week = [(i, p) for i, p in valid if str(p["date"]) >= cutoff]
+    if this_week:
+        baseline_i, baseline = this_week[0]
+    elif valid:
+        baseline_i, baseline = valid[-1]
+    else:
         return None
-    baseline = rows[baseline_i]
     index = twr_index(rows + [{"date": today_str, "nav": nav_now, "flow": flow_today}])
     port = pct_change(index[-1], index[baseline_i])
     base_spy = baseline.get("spy_close")
