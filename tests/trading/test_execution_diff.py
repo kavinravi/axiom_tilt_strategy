@@ -41,6 +41,77 @@ def test_diff_to_orders_default_still_fractional():
 
 
 # ---------------------------------------------------------------------------
+# residual-cash top-up: spend the cash stranded by whole-share flooring
+# ---------------------------------------------------------------------------
+
+def test_topup_buys_most_underweight_name():
+    from trading.execution.diff import target_shares
+    # nav 10k, all prices 100. Floors: A 35 ($3500, $70 under), B 33 ($3300,
+    # $30 under), C 31 (exact). Stranded cash = $100 → one more share of A,
+    # the most dollar-underweight name.
+    weights = {"A": 0.357, "B": 0.333, "C": 0.31}
+    prices = {"A": 100.0, "B": 100.0, "C": 100.0}
+    result = target_shares(weights, 10_000.0, prices, whole_shares=True, max_weight=1.0)
+    assert result == {"A": 36.0, "B": 33.0, "C": 31.0}
+
+
+def test_topup_respects_cap():
+    from trading.execution.diff import target_shares
+    weights = {"A": 0.357, "B": 0.333, "C": 0.31}
+    prices = {"A": 100.0, "B": 100.0, "C": 100.0}
+    # Cap at 35.5%: topping A to 36 shares would be $3600 > $3550 → blocked;
+    # the share goes to B, the next-most-underweight name, instead.
+    result = target_shares(weights, 10_000.0, prices, whole_shares=True, max_weight=0.355)
+    assert result == {"A": 35.0, "B": 34.0, "C": 31.0}
+
+
+def test_topup_skips_unaffordable_max_deficit():
+    from trading.execution.diff import target_shares
+    # B is the most underweight ($50) but a B share costs $90 > the $70 budget;
+    # the cash buys what it can reach: one A share.
+    weights = {"A": 0.5, "B": 0.5}
+    prices = {"A": 60.0, "B": 90.0}
+    result = target_shares(weights, 10_000.0, prices, whole_shares=True, max_weight=1.0)
+    # floors: A 83 ($4980, $20 under), B 55 ($4950, $50 under) → budget $70
+    assert result == {"A": 84.0, "B": 55.0}
+
+
+def test_topup_leftover_below_cheapest_share():
+    from trading.execution.diff import target_shares
+    weights = {"A": 0.6, "B": 0.4}
+    prices = {"A": 7.0, "B": 11.0}
+    result = target_shares(weights, 10_000.0, prices, whole_shares=True, max_weight=1.0)
+    # floors: A 857 ($5999, $1 under), B 363 ($3993, $7 under) → budget $8:
+    # B unaffordable, +1 A → $1 left, smaller than every share price.
+    assert result == {"A": 858.0, "B": 363.0}
+    leftover = 10_000.0 - (858 * 7.0 + 363 * 11.0)
+    assert leftover < min(prices.values())
+
+
+def test_topup_never_runs_for_fractional():
+    from trading.execution.diff import target_shares
+    # Fractional sizing is already exact — no top-up applies.
+    weights = {"A": 0.5, "B": 0.5}
+    prices = {"A": 60.0, "B": 90.0}
+    result = target_shares(weights, 10_000.0, prices)
+    assert result["A"] == pytest.approx(5000.0 / 60.0)
+    assert result["B"] == pytest.approx(5000.0 / 90.0)
+
+
+def test_topup_invested_never_exceeds_target_book():
+    from trading.execution.diff import target_shares
+    # The top-up only redeploys flooring losses: invested stays <= sum(w)*nav,
+    # so the book still can't exceed NAV (no buying-power reject).
+    weights = {"A": 0.357, "B": 0.333, "C": 0.31}
+    prices = {"A": 97.0, "B": 41.0, "C": 13.0}
+    result = target_shares(weights, 10_000.0, prices, whole_shares=True, max_weight=1.0)
+    invested = sum(result[t] * prices[t] for t in result)
+    assert invested <= sum(weights.values()) * 10_000.0 + 1e-6
+    # and the leftover is smaller than the cheapest share
+    assert 10_000.0 - invested < min(prices.values())
+
+
+# ---------------------------------------------------------------------------
 # target_shares tests
 # ---------------------------------------------------------------------------
 
