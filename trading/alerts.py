@@ -1,7 +1,9 @@
 """Failure alerting for unattended jobs.
 
 Sends a short message to whatever channel is configured via env vars:
-- ALERT_WEBHOOK_URL          POST {"text": message} (ntfy/Slack/Discord/Telegram-style).
+- ALERT_WEBHOOK_URL          ntfy URLs get a plain-text POST (body = message,
+                             Title/Priority headers); others get Slack-style
+                             JSON {"text": message}.
 - ALERT_EMAIL_TO + ALERT_SMTP_*   send an email.
 
 Both are optional. If neither is set, the message is only logged — send_alert never
@@ -17,6 +19,7 @@ import json
 import logging
 import smtplib
 import sys
+import urllib.parse
 import urllib.request
 from email.message import EmailMessage
 
@@ -26,10 +29,20 @@ logger = logging.getLogger(__name__)
 
 
 def _send_webhook(url: str, message: str) -> None:
-    data = json.dumps({"text": message}).encode()
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}
-    )
+    if "ntfy" in urllib.parse.urlsplit(url).netloc:
+        # ntfy: the raw body IS the notification text; metadata rides in headers.
+        data = message.encode()
+        headers = {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Title": "axiom-tilt alert",
+            "Priority": "high",
+            "Tags": "rotating_light",
+        }
+    else:
+        # Slack-style JSON for everything else.
+        data = json.dumps({"text": message}).encode()
+        headers = {"Content-Type": "application/json"}
+    req = urllib.request.Request(url, data=data, headers=headers)
     with urllib.request.urlopen(req, timeout=15) as resp:
         resp.read()
 

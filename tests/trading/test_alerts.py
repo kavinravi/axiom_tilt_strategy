@@ -92,3 +92,31 @@ def test_main_joins_argv_into_message(monkeypatch):
     monkeypatch.setattr(alerts.sys, "argv", ["prog", "weights", "job", "failed"])
     assert alerts.main() == 0
     assert sent == ["weights job failed"]
+
+
+def test_send_webhook_ntfy_posts_plain_text(monkeypatch):
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b""
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["data"] = req.data
+        captured["content_type"] = req.headers.get("Content-type")
+        captured["title"] = req.headers.get("Title")
+        return _Resp()
+
+    monkeypatch.setattr(alerts.urllib.request, "urlopen", fake_urlopen)
+    alerts._send_webhook("https://ntfy.sh/axiom-tilt-abc123", "gateway down")
+    # ntfy: raw body is the message, not JSON
+    assert captured["data"] == b"gateway down"
+    assert captured["content_type"].startswith("text/plain")
+    assert captured["title"] == "axiom-tilt alert"
