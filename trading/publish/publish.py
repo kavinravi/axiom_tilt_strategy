@@ -89,6 +89,9 @@ def publish_live(broker, store, *, weights_dir, orders_dir, asof, today, spy_las
     today = pd.Timestamp(today).normalize()
     if today.tz is not None:  # make the contract explicit: operate on a tz-naive date
         today = today.tz_localize(None)
+    # The snapshot's "as of" is the real publish moment — a normalized date would
+    # render on the dashboard as midnight UTC = the prior evening in ET.
+    published_at = pd.Timestamp.now(tz="America/New_York").isoformat()
 
     # 1. Live account state (connect/disconnect bracket).
     broker.connect()
@@ -170,7 +173,7 @@ def publish_live(broker, store, *, weights_dir, orders_dir, asof, today, spy_las
     store.upsert_equity_point(today_str, nav, spy_last, flow=flow_today)
     store.upsert_snapshot(
         {
-            "asof": today_str,
+            "asof": published_at,
             "nav": nav,
             "day_pnl": day_pnl,
             "day_pnl_pct": day_pnl_pct,
@@ -275,7 +278,8 @@ def publish_from_audit(store, *, weights_dir, orders_dir, asof, today, price_fet
     store.replace_equity_curve(curve)
     store.upsert_snapshot(
         {
-            "asof": today_str,
+            # Real publish moment, not the normalized date (renders wrong in ET).
+            "asof": pd.Timestamp.now(tz="America/New_York").isoformat(),
             "nav": nav,
             "day_pnl": day_pnl,
             "day_pnl_pct": day_pnl_pct,

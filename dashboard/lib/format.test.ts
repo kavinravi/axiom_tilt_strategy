@@ -7,8 +7,11 @@ describe("format", () => {
   it("pct from fraction", () => { expect(fmtPct(0.0423)).toBe("4.23%"); });
   it("signed pct", () => { expect(fmtSignedPct(0.0059)).toBe("+0.59%"); expect(fmtSignedPct(-0.01)).toBe("-1.00%"); });
   it("bps", () => { expect(fmtBps(3.8)).toBe("3.8 bps"); });
-  it("asOfET renders an ET clock label", () => {
-    expect(asOfET("2026-06-08T19:00:00+00:00")).toBe("as of 3:00 PM ET");
+  it("asOfET renders a full ET date+time label", () => {
+    expect(asOfET("2026-06-08T19:00:00+00:00")).toBe("updated Mon, Jun 8, 3:00 PM ET");
+  });
+  it("asOfET without data", () => {
+    expect(asOfET(null)).toBe("no data yet");
   });
 });
 

@@ -24,8 +24,10 @@ export function fmtBps(n: number | null | undefined, digits = 1): string {
 }
 export function asOfET(iso: string | null | undefined): string {
   if (!iso) return "no data yet";
+  // Full weekday + date + time: a bare "8:00 PM ET" is ambiguous (which day?).
   const t = new Date(iso).toLocaleString("en-US", {
-    timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true,
+    timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: true,
   });
-  return `as of ${t} ET`;
+  return `updated ${t} ET`;
 }

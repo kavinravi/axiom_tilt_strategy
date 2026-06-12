@@ -11,7 +11,8 @@ test("Holdings shows names, the 10% cap line, and a no-quote flag", async ({ pag
   await login(page);
   await page.goto("/holdings");
   await expect(page.getByText("NVDA")).toBeVisible();
-  await expect(page.getByText("10% cap", { exact: true })).toBeVisible();
+  await expect(page.getByText("10% per-stock cap", { exact: true })).toBeVisible();
+  await expect(page.getByText("Today's P&L", { exact: true })).toBeVisible();
   await expect(page.getByText("no quote")).toBeVisible(); // the ZZZQ row has price 0
 });
 
